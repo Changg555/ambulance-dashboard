@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  ref,
-  onValue,
-  update,
-  remove,
-} from "firebase/database";
+import { ref, onValue, update, remove } from "firebase/database";
 import { db } from "../config/firebase";
 
 const STATUS_LABELS = {
   pending: "แจ้งเหตุ",
   accepted: "เจ้าหน้าที่รับเคส",
-  on_the_way: "รถพยาบาลกำลังเดินทาง",
+  en_route: "รถพยาบาลกำลังเดินทาง",
   arrived: "ถึงจุดเกิดเหตุ",
   completed: "เสร็จสิ้นเคส",
+  cancelled: "ยกเลิกเคส",
 };
+
+function normalizeStatus(status) {
+  if (status === "on_the_way") return "en_route";
+  return status || "pending";
+}
 
 function calcDistance(lat1, lng1, lat2, lng2) {
   const R = 6371000;
@@ -44,6 +45,7 @@ export function useIncidents() {
         .map(([id, value]) => ({
           id,
           ...value,
+          status: normalizeStatus(value.status),
         }))
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
@@ -102,18 +104,25 @@ export function useIncidents() {
   }, [incidentsRaw, serviceArea]);
 
   const activeIncidents = useMemo(() => {
-    return incidents.filter((item) => !item.archived);
+    return incidents.filter(
+      (item) =>
+        !item.archived &&
+        item.status !== "completed" &&
+        item.status !== "cancelled"
+    );
   }, [incidents]);
 
   const historyIncidents = useMemo(() => {
     return incidents.filter(
-      (item) => item.archived || item.status === "completed"
+      (item) =>
+        item.archived ||
+        item.status === "completed" ||
+        item.status === "cancelled"
     );
   }, [incidents]);
 
   const stats = useMemo(() => {
-    const today = new Date();
-    const todayText = today.toDateString();
+    const todayText = new Date().toDateString();
 
     const todayCases = incidents.filter((item) => {
       if (!item.createdAt) return false;
@@ -124,32 +133,12 @@ export function useIncidents() {
       (item) => item.status === "completed"
     );
 
-    const pendingCases = incidents.filter(
-      (item) => item.status === "pending"
-    );
-
     const activeCases = incidents.filter(
-      (item) => !item.archived && item.status !== "completed"
+      (item) =>
+        !item.archived &&
+        item.status !== "completed" &&
+        item.status !== "cancelled"
     );
-
-    const insideCases = incidents.filter(
-      (item) => item.isInsideServiceArea === true
-    );
-
-    const outsideCases = incidents.filter(
-      (item) => item.isInsideServiceArea === false
-    );
-
-    const typeCount = {};
-
-    incidents.forEach((item) => {
-      const type = item.type || "other";
-      typeCount[type] = (typeCount[type] || 0) + 1;
-    });
-
-    const topType =
-      Object.entries(typeCount).sort((a, b) => b[1] - a[1])[0]?.[0] ||
-      "-";
 
     const completedWithTime = completedCases.filter(
       (item) => item.createdAt && item.completedAt
@@ -170,17 +159,23 @@ export function useIncidents() {
       total: incidents.length,
       today: todayCases.length,
       active: activeCases.length,
-      pending: pendingCases.length,
+      pending: incidents.filter((item) => item.status === "pending").length,
+      accepted: incidents.filter((item) => item.status === "accepted").length,
+      en_route: incidents.filter((item) => item.status === "en_route").length,
+      arrived: incidents.filter((item) => item.status === "arrived").length,
       completed: completedCases.length,
+      cancelled: incidents.filter((item) => item.status === "cancelled").length,
       archived: incidents.filter((item) => item.archived).length,
-      inside: insideCases.length,
-      outside: outsideCases.length,
-      topType,
+      inside: incidents.filter((item) => item.isInsideServiceArea === true)
+        .length,
+      outside: incidents.filter((item) => item.isInsideServiceArea === false)
+        .length,
       avgResponseTime,
     };
   }, [incidents]);
 
   const updateStatus = async (incidentId, newStatus) => {
+    const fixedStatus = normalizeStatus(newStatus);
     const incident = incidents.find((item) => item.id === incidentId);
 
     if (!incident) return;
@@ -190,22 +185,46 @@ export function useIncidents() {
       : [];
 
     const timelineItem = {
-      status: newStatus,
-      label: STATUS_LABELS[newStatus] || newStatus,
+      status: fixedStatus,
+      label: STATUS_LABELS[fixedStatus] || fixedStatus,
       time: Date.now(),
     };
 
     const payload = {
-      status: newStatus,
+      status: fixedStatus,
       updatedAt: Date.now(),
       timeline: [...oldTimeline, timelineItem],
     };
 
-    if (newStatus === "completed") {
+    if (fixedStatus === "completed") {
       payload.completedAt = Date.now();
     }
 
     await update(ref(db, `incidents/${incidentId}`), payload);
+  };
+
+  const cancelIncident = async (incidentId) => {
+    const incident = incidents.find((item) => item.id === incidentId);
+
+    if (!incident) return;
+
+    const oldTimeline = Array.isArray(incident.timeline)
+      ? incident.timeline
+      : [];
+
+    await update(ref(db, `incidents/${incidentId}`), {
+      status: "cancelled",
+      cancelledAt: Date.now(),
+      updatedAt: Date.now(),
+      timeline: [
+        ...oldTimeline,
+        {
+          status: "cancelled",
+          label: "ยกเลิกเคส",
+          time: Date.now(),
+        },
+      ],
+    });
   };
 
   const archiveIncident = async (incidentId) => {
@@ -235,6 +254,7 @@ export function useIncidents() {
     stats,
     serviceArea,
     updateStatus,
+    cancelIncident,
     archiveIncident,
     restoreIncident,
     deleteIncident,

@@ -18,7 +18,7 @@ const KPS_CENTER = {
 const STATUS_COLORS = {
   pending: "#DC2626",
   accepted: "#EA580C",
-  on_the_way: "#2563EB",
+  en_route: "#2563EB",
   arrived: "#7C3AED",
   completed: "#16A34A",
 };
@@ -26,10 +26,15 @@ const STATUS_COLORS = {
 const STATUS_LABELS = {
   pending: "รอดำเนินการ",
   accepted: "รับเคสแล้ว",
-  on_the_way: "กำลังเดินทาง",
+  en_route: "กำลังเดินทาง",
   arrived: "ถึงจุดเกิดเหตุ",
   completed: "เสร็จสิ้น",
 };
+
+function normalizeStatus(status) {
+  if (status === "on_the_way") return "en_route";
+  return status || "pending";
+}
 
 function makeMarkerIcon(color, isOutside) {
   const finalColor = isOutside ? "#6B7280" : color;
@@ -59,7 +64,7 @@ function makeMarkerIcon(color, isOutside) {
 }
 
 export default function IncidentMap({
-  incidents,
+  incidents = [],
   selectedId,
   onMarkerClick,
 }) {
@@ -82,9 +87,7 @@ export default function IncidentMap({
   if (!isLoaded) {
     return (
       <div className="w-full h-full bg-gray-200 flex items-center justify-center rounded-xl">
-        <p className="text-gray-500 text-sm">
-          กำลังโหลดแผนที่...
-        </p>
+        <p className="text-gray-500 text-sm">กำลังโหลดแผนที่...</p>
       </div>
     );
   }
@@ -95,7 +98,7 @@ export default function IncidentMap({
   };
 
   const validIncidents = incidents.filter(
-    (inc) => inc.location?.lat && inc.location?.lng
+    (inc) => inc?.location?.lat && inc?.location?.lng
   );
 
   const selectedIncident = validIncidents.find(
@@ -130,7 +133,8 @@ export default function IncidentMap({
       )}
 
       {validIncidents.map((inc) => {
-        const color = STATUS_COLORS[inc.status] || "#888";
+        const status = normalizeStatus(inc.status);
+        const color = STATUS_COLORS[status] || "#888";
         const isSelected = selectedId === inc.id;
         const isOutside = inc.isInsideServiceArea === false;
 
@@ -162,7 +166,7 @@ export default function IncidentMap({
             </p>
 
             <p className="text-xs text-red-700 font-semibold mb-1">
-              {STATUS_LABELS[selectedIncident.status] ||
+              {STATUS_LABELS[normalizeStatus(selectedIncident.status)] ||
                 selectedIncident.status}
             </p>
 
@@ -179,8 +183,7 @@ export default function IncidentMap({
             )}
 
             <p className="text-gray-600 text-xs">
-              {selectedIncident.location?.address ||
-                "ไม่ทราบตำแหน่ง"}
+              {selectedIncident.location?.address || "ไม่ทราบตำแหน่ง"}
             </p>
 
             {selectedIncident.description && (

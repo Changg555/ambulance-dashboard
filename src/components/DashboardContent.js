@@ -19,6 +19,7 @@ export default function DashboardContent({ user, role }) {
     historyIncidents,
     loading,
     updateStatus,
+    cancelIncident,
     archiveIncident,
     restoreIncident,
     deleteIncident,
@@ -151,6 +152,7 @@ export default function DashboardContent({ user, role }) {
                   onClick={() => setSelected(inc.id)}
                   onUpdateStatus={updateStatus}
                   onArchive={archiveIncident}
+                  onCancel={cancelIncident}
                 />
               ))}
             </div>
@@ -171,6 +173,7 @@ export default function DashboardContent({ user, role }) {
           incidents={historyIncidents}
           onRestore={restoreIncident}
           onDelete={deleteIncident}
+          role={role}
         />
       )}
 

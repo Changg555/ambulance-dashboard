@@ -8,6 +8,11 @@ const TYPE_LABELS = {
   other: "อื่น ๆ",
 };
 
+function normalizeStatus(status) {
+  if (status === "on_the_way") return "en_route";
+  return status || "unknown";
+}
+
 function countByType(incidents) {
   const result = {};
 
@@ -29,26 +34,28 @@ function countByStatus(incidents) {
   const result = {};
 
   incidents.forEach((item) => {
-    const status = item.status || "unknown";
+    const status = normalizeStatus(item.status);
     result[status] = (result[status] || 0) + 1;
   });
 
   return result;
 }
 
-export default function AnalyticsDashboard({ incidents, stats }) {
+export default function AnalyticsDashboard({ incidents = [], stats = {} }) {
   const typeStats = countByType(incidents);
   const statusStats = countByStatus(incidents);
 
   const maxTypeCount =
-    typeStats.length > 0 ? Math.max(...typeStats.map((item) => item.count)) : 1;
+    typeStats.length > 0
+      ? Math.max(...typeStats.map((item) => item.count))
+      : 1;
 
   return (
     <div className="p-4 h-full overflow-y-auto">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-        <StatCard title="เคสทั้งหมด" value={stats.total} />
-        <StatCard title="เคสวันนี้" value={stats.today} />
-        <StatCard title="กำลังดำเนินการ" value={stats.active} />
+        <StatCard title="เคสทั้งหมด" value={stats.total || 0} />
+        <StatCard title="เคสวันนี้" value={stats.today || 0} />
+        <StatCard title="กำลังดำเนินการ" value={stats.active || 0} />
         <StatCard
           title="เวลาเฉลี่ย"
           value={`${stats.avgResponseTime || 0} นาที`}
@@ -97,26 +104,31 @@ export default function AnalyticsDashboard({ incidents, stats }) {
               value={statusStats.pending || 0}
               color="bg-yellow-100 text-yellow-700"
             />
+
             <StatusBox
               label="รับเคสแล้ว"
               value={statusStats.accepted || 0}
               color="bg-blue-100 text-blue-700"
             />
+
             <StatusBox
               label="กำลังเดินทาง"
-              value={statusStats.on_the_way || 0}
+              value={statusStats.en_route || 0}
               color="bg-purple-100 text-purple-700"
             />
+
             <StatusBox
               label="ถึงจุดเกิดเหตุ"
               value={statusStats.arrived || 0}
               color="bg-orange-100 text-orange-700"
             />
+
             <StatusBox
               label="เสร็จสิ้น"
               value={statusStats.completed || 0}
               color="bg-green-100 text-green-700"
             />
+
             <StatusBox
               label="เก็บประวัติ"
               value={stats.archived || 0}
