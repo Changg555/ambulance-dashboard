@@ -16,3 +16,12 @@ body {
 ::-webkit-scrollbar-track  { background: #f1f1f1; border-radius: 4px; }
 ::-webkit-scrollbar-thumb  { background: #ccc; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #aaa; }
+
+/* ซ่อน Scrollbar แต่ยังเลื่อนได้ */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
