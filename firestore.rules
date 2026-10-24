@@ -119,8 +119,24 @@ service cloud.firestore {
 
       // Timeline ของเคส
       match /timeline/{timelineId} {
-        allow read: if isAuthorizedStaff() || (isSignedIn() && get(/databases/$(database)/documents/incidents/$(incidentId)).data.userId == request.auth.uid);
-        allow create: if isAuthorizedStaff() || (isSignedIn() && get(/databases/$(database)/documents/incidents/$(incidentId)).data.userId == request.auth.uid);
+        allow read: if isAuthorizedStaff() || (
+          isSignedIn() && (
+            exists(/databases/$(database)/documents/incidents/$(incidentId))
+            && get(/databases/$(database)/documents/incidents/$(incidentId)).data.userId == request.auth.uid
+          )
+        );
+
+        // อนุญาตให้สร้างประวัติ (timeline) ได้:
+        // 1. เจ้าหน้าที่ (Staff/Admin) อัปเดตขั้นตอนการช่วยเหลือได้ทุกสถานะ
+        // 2. ประชาชนทั่วไป เมื่อสร้างเคสใหม่ (พร้อมกันใน writeBatch) หรือยกเลิกเคสตัวเอง
+        allow create: if isAuthorizedStaff() || (
+          isSignedIn() && (
+            (existsAfter(/databases/$(database)/documents/incidents/$(incidentId)) && getAfter(/databases/$(database)/documents/incidents/$(incidentId)).data.userId == request.auth.uid) ||
+            (exists(/databases/$(database)/documents/incidents/$(incidentId)) && get(/databases/$(database)/documents/incidents/$(incidentId)).data.userId == request.auth.uid) ||
+            (request.resource.data.status in ['pending', 'cancelled'])
+          )
+        );
+
         allow update, delete: if isAuthorizedStaff();
       }
     }
