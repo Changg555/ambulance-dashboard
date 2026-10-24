@@ -1,17 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Circle,
   GoogleMap,
   InfoWindow,
   Marker,
   useJsApiLoader,
 } from '@react-google-maps/api';
-import { onValue, ref } from 'firebase/database';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
-// ค่ากลางเริ่มต้นและสถานะที่ใช้ร่วมกันในแผนที่
-const KPS_CENTER = { lat: 14.0280249, lng: 99.9806146 };
-const SERVICE_AREA_PATH = 'service_area';
+// ค่ากลางเริ่มต้น (สถานพยาบาล ม.เกษตรฯ กำแพงแสน) และสถานะที่ใช้ร่วมกันในแผนที่
+const KPS_CENTER = { lat: 14.028746607870978, lng: 99.97823358223988 };
 const DEFAULT_SERVICE_RADIUS = 1300;
 const MAP_OPTIONS = {
   mapTypeId: 'hybrid',
@@ -21,38 +19,44 @@ const MAP_OPTIONS = {
   mapTypeControl: false,
   fullscreenControl: true,
 };
+const TYPE_LABELS = {
+  sos: '🚨 แจ้งเหตุด่วน (SOS)',
+  car_accident: '🚗 อุบัติเหตุรถ',
+  cardiac: '❤️ หัวใจ/หมดสติ',
+  injury: '🩹 บาดเจ็บ',
+  fire: '🔥 ไฟไหม้',
+  drowning: '🌊 จมน้ำ',
+  other: '⚠️ เหตุอื่น ๆ',
+};
 const STATUS_CONFIG = {
-  pending: { color: '#EF4444', label: 'รอดำเนินการ' },
-  accepted: { color: '#F59E0B', label: 'รับเคสแล้ว' },
-  en_route: { color: '#3B82F6', label: 'กำลังเดินทาง' },
-  arrived: { color: '#8B5CF6', label: 'ถึงจุดเกิดเหตุ' },
-  completed: { color: '#10B981', label: 'เสร็จสิ้น' },
+  pending: { color: '#EF4444', label: 'รอเจ้าหน้าที่รับเรื่อง' },
+  accepted: { color: '#3B82F6', label: 'เจ้าหน้าที่รับเรื่องแล้ว' },
+  on_the_way: { color: '#8B5CF6', label: 'กำลังเดินทางไปหาคุณ' },
+  arrived: { color: '#14B884', label: 'ถึงจุดเกิดเหตุแล้ว' },
+  completed: { color: '#16A34A', label: 'ช่วยเหลือเสร็จสิ้น' },
 };
 const FALLBACK_MARKER_COLOR = '#94A3B8';
 
-// รวมชื่อสถานะเดิมให้ใช้รหัสสถานะมาตรฐานเดียวกัน
-function normalizeStatus(status) {
-  if (status === 'on_the_way') return 'en_route';
-  return status || 'pending';
-}
-
-// แปลงพิกัดเป็นตัวเลข และปฏิเสธค่าที่ไม่ใช่พิกัดที่ถูกต้อง
+// แปลงพิกัดเป็นตัวเลข รองรับทั้ง latitude/longitude (Mobile) และ lat/lng
 function getCoordinates(location) {
+  const rawLat = location?.latitude ?? location?.lat;
+  const rawLng = location?.longitude ?? location?.lng;
+
   if (
-    location?.lat === null ||
-    location?.lat === undefined ||
-    location?.lng === null ||
-    location?.lng === undefined ||
-    location.lat === '' ||
-    location.lng === ''
+    rawLat === null ||
+    rawLat === undefined ||
+    rawLng === null ||
+    rawLng === undefined ||
+    rawLat === '' ||
+    rawLng === ''
   ) {
     return null;
   }
 
-  const lat = Number(location?.lat);
-  const lng = Number(location?.lng);
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
 
   return { lat, lng };
 }
@@ -86,8 +90,8 @@ function createMarkerIcon(color, isOutside) {
 
 // แสดงป้ายสถานะของเหตุการณ์ใน InfoWindow
 function IncidentStatus({ status }) {
-  const normalizedStatus = normalizeStatus(status);
-  const label = STATUS_CONFIG[normalizedStatus]?.label || status || 'ไม่ระบุสถานะ';
+  const currentStatus = status || 'pending';
+  const label = STATUS_CONFIG[currentStatus]?.label || status || 'ไม่ระบุสถานะ';
 
   return (
     <p className="text-[11px] font-bold text-red-500 bg-red-50 inline-block px-2 py-0.5 rounded-md mb-2">
@@ -115,6 +119,7 @@ function ServiceAreaStatus({ isInside }) {
 // แสดงรายละเอียดเหตุการณ์และตำแหน่งในหน้าต่างข้อมูลของหมุด
 function IncidentInfoWindow({ incident, onClose }) {
   const position = getCoordinates(incident.location);
+  const address = incident.address || incident.location?.address || 'ไม่ทราบตำแหน่ง';
 
   if (!position) return null;
 
@@ -122,14 +127,19 @@ function IncidentInfoWindow({ incident, onClose }) {
     <InfoWindow position={position} onCloseClick={onClose}>
       <div className="p-1 min-w-[200px] font-sans">
         <p className="font-bold text-slate-800 text-sm mb-1">
-          {incident.type || 'เหตุฉุกเฉิน'}
+          {TYPE_LABELS[incident.type] || incident.type || 'เหตุฉุกเฉิน'}
         </p>
         <IncidentStatus status={incident.status} />
+        {incident.reporter && (
+          <p className="text-slate-700 text-xs font-medium mb-1">
+            👤 {incident.reporter.name} {incident.reporter.phone ? `(${incident.reporter.phone})` : ''}
+          </p>
+        )}
         <div className="mb-2">
           <ServiceAreaStatus isInside={incident.isInsideServiceArea} />
         </div>
         <p className="text-slate-600 text-xs font-medium leading-relaxed mt-1">
-          📍 {incident.location?.address || 'ไม่ทราบตำแหน่ง'}
+          📍 {address}
         </p>
         {incident.description && (
           <div className="mt-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
@@ -147,7 +157,7 @@ function IncidentInfoWindow({ incident, onClose }) {
 // วาดหมุดเหตุการณ์ตามสถานะ พร้อมยกหมุดที่เลือกขึ้นมาแสดงด้านหน้า
 function IncidentMarkers({ incidents, selectedId, onMarkerClick }) {
   return incidents.map((incident) => {
-    const status = normalizeStatus(incident.status);
+    const status = incident.status || 'pending';
     const color = STATUS_CONFIG[status]?.color || FALLBACK_MARKER_COLOR;
     const position = getCoordinates(incident.location);
     const isSelected = selectedId === incident.id;
@@ -172,15 +182,27 @@ export default function IncidentMap({
   onMarkerClick,
 }) {
   const [serviceArea, setServiceArea] = useState(null);
+  const [mapCenter, setMapCenter] = useState(KPS_CENTER);
+  const [mapInstance, setMapInstance] = useState(null);
+  const mapRef = useRef(null);
+  const circleRef = useRef(null);
+  const initialCenteredRef = useRef(false);
+  const lastTopIncidentIdRef = useRef(null);
+
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_KEY,
   });
 
-  // สมัครรับข้อมูลพื้นที่ให้บริการจาก Firebase และยกเลิกเมื่อออกจากหน้า
+  // สมัครรับข้อมูลพื้นที่ให้บริการจาก Firestore (doc(db, "settings", "serviceArea")) ตามฝั่ง Mobile
   useEffect(() => {
-    const areaRef = ref(db, SERVICE_AREA_PATH);
-    return onValue(areaRef, (snapshot) => {
-      setServiceArea(snapshot.val());
+    const areaRef = doc(db, 'settings', 'serviceArea');
+    return onSnapshot(areaRef, (snap) => {
+      const data = snap.exists() ? snap.data() : null;
+      setServiceArea(data);
+      const center = getServiceCenter(data);
+      if (!lastTopIncidentIdRef.current) {
+        setMapCenter(center);
+      }
     });
   }, []);
 
@@ -198,6 +220,109 @@ export default function IncidentMap({
     [validIncidents, selectedId],
   );
 
+  const panToCoord = useCallback((coord, zoomLevel = 17) => {
+    if (!coord) return;
+    setMapCenter(coord);
+    if (mapRef.current) {
+      mapRef.current.panTo(coord);
+      if (zoomLevel) {
+        mapRef.current.setZoom(zoomLevel);
+      }
+    }
+  }, []);
+
+  // เมื่อคลิกเลือกเคส ให้เลื่อนแผนที่ไปยังตำแหน่งเกิดเหตุของเคสนั้นทันที
+  useEffect(() => {
+    if (!selectedIncident) return;
+    const pos = getCoordinates(selectedIncident.location);
+    if (pos) {
+      panToCoord(pos, 17);
+    }
+  }, [selectedIncident, panToCoord]);
+
+  // เมื่อมีเคสใหม่เข้ามา หรือโหลดเคสครั้งแรก ให้เลื่อนแผนที่ไปยังจุดเกิดเหตุล่าสุดอัตโนมัติ
+  useEffect(() => {
+    if (validIncidents.length === 0) return;
+    const newest = validIncidents[0];
+    if (lastTopIncidentIdRef.current !== newest.id) {
+      lastTopIncidentIdRef.current = newest.id;
+      const pos = getCoordinates(newest.location);
+      if (pos) {
+        panToCoord(pos, 17);
+      }
+    }
+  }, [validIncidents, panToCoord]);
+
+  const handleMapLoad = useCallback(
+    (map) => {
+      mapRef.current = map;
+      setMapInstance(map);
+      if (!initialCenteredRef.current) {
+        initialCenteredRef.current = true;
+        if (validIncidents.length > 0) {
+          const firstPos = getCoordinates(validIncidents[0].location);
+          if (firstPos) {
+            setMapCenter(firstPos);
+            map.setCenter(firstPos);
+            map.setZoom(17);
+            return;
+          }
+        }
+        setMapCenter(serviceCenter);
+        map.setCenter(serviceCenter);
+        map.setZoom(16);
+      }
+    },
+    [validIncidents, serviceCenter]
+  );
+
+  // สร้างและอัปเดตวงกลมพื้นที่ให้บริการเพียงวงเดียว (ป้องกันวงกลมเก่าค้างบนแผนที่เมื่อเปลี่ยนพื้นที่)
+  useEffect(() => {
+    if (!mapInstance || !window.google?.maps) return;
+
+    const circle = new window.google.maps.Circle({
+      strokeColor: '#EF4444',
+      strokeOpacity: 0.8,
+      strokeWeight: 2,
+      fillOpacity: 0,
+      clickable: false,
+      map: serviceArea?.enabled !== false && serviceArea?.center ? mapInstance : null,
+      center: serviceCenter,
+      radius: Number(serviceArea?.radius) || DEFAULT_SERVICE_RADIUS,
+    });
+    circleRef.current = circle;
+
+    return () => {
+      circle.setMap(null);
+      circleRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapInstance]);
+
+  useEffect(() => {
+    if (!circleRef.current) return;
+    const isVisible = serviceArea?.enabled !== false && Boolean(serviceArea?.center);
+    circleRef.current.setCenter(serviceCenter);
+    circleRef.current.setRadius(Number(serviceArea?.radius) || DEFAULT_SERVICE_RADIUS);
+    circleRef.current.setMap(isVisible ? mapInstance : null);
+  }, [mapInstance, serviceArea, serviceCenter]);
+
+  const goToMyBrowserLocation = () => {
+    if (!navigator.geolocation) {
+      alert('เบราว์เซอร์ของคุณไม่รองรับการระบุตำแหน่ง GPS');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        panToCoord({ lat: pos.coords.latitude, lng: pos.coords.longitude }, 17);
+      },
+      () => {
+        alert('ไม่สามารถดึงตำแหน่งปัจจุบันได้ กรุณาอนุญาตการเข้าถึงตำแหน่งของเบราว์เซอร์');
+      },
+      { enableHighAccuracy: true }
+    );
+  };
+
   // แสดงสถานะโหลดจนกว่า Google Maps API จะพร้อมใช้งาน
   if (!isLoaded) {
     return (
@@ -208,40 +333,64 @@ export default function IncidentMap({
   }
 
   return (
-    <GoogleMap
-      mapContainerClassName="w-full h-full"
-      center={serviceCenter}
-      zoom={16}
-      options={MAP_OPTIONS}
-    >
-      {/* วาดวงรัศมีเมื่อเปิดใช้งานพื้นที่ให้บริการ */}
-      {serviceArea?.enabled && (
-        <Circle
-          center={serviceCenter}
-          radius={Number(serviceArea.radius) || DEFAULT_SERVICE_RADIUS}
-          options={{
-            strokeColor: '#EF4444',
-            strokeOpacity: 0.8,
-            strokeWeight: 2,
-            fillOpacity: 0,
-          }}
+    <div className="relative w-full h-full">
+      <GoogleMap
+        mapContainerClassName="w-full h-full"
+        center={mapCenter}
+        zoom={16}
+        onLoad={handleMapLoad}
+        onUnmount={() => {
+          mapRef.current = null;
+          setMapInstance(null);
+        }}
+        options={MAP_OPTIONS}
+      >
+        {/* แสดงหมุดเหตุการณ์ทั้งหมดที่มีพิกัดถูกต้อง */}
+        <IncidentMarkers
+          incidents={validIncidents}
+          selectedId={selectedId}
+          onMarkerClick={onMarkerClick}
         />
-      )}
 
-      {/* แสดงหมุดเหตุการณ์ทั้งหมดที่มีพิกัดถูกต้อง */}
-      <IncidentMarkers
-        incidents={validIncidents}
-        selectedId={selectedId}
-        onMarkerClick={onMarkerClick}
-      />
+        {/* แสดงข้อมูลเหตุการณ์เมื่อเลือกหมุด */}
+        {selectedIncident && (
+          <IncidentInfoWindow
+            incident={selectedIncident}
+            onClose={() => onMarkerClick?.(null)}
+          />
+        )}
+      </GoogleMap>
 
-      {/* แสดงข้อมูลเหตุการณ์เมื่อเลือกหมุด */}
-      {selectedIncident && (
-        <IncidentInfoWindow
-          incident={selectedIncident}
-          onClose={() => onMarkerClick?.(null)}
-        />
-      )}
-    </GoogleMap>
+      {/* ปุ่มลัดควบคุมตำแหน่งแผนที่ */}
+      <div className="absolute top-3 left-3 z-10 flex flex-wrap gap-2">
+        {validIncidents.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              const target = selectedIncident || validIncidents[0];
+              const pos = getCoordinates(target?.location);
+              if (pos) panToCoord(pos, 17);
+            }}
+            className="bg-white/95 hover:bg-white text-slate-800 text-xs font-bold px-3 py-2 rounded-xl shadow-md border border-slate-200 transition-all"
+          >
+            📍 ไปที่จุดเกิดเหตุ ({validIncidents.length})
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => panToCoord(serviceCenter, 15)}
+          className="bg-white/95 hover:bg-white text-slate-700 text-xs font-bold px-3 py-2 rounded-xl shadow-md border border-slate-200 transition-all"
+        >
+          🏥 ศูนย์กลางพื้นที่บริการ
+        </button>
+        <button
+          type="button"
+          onClick={goToMyBrowserLocation}
+          className="bg-white/95 hover:bg-white text-red-600 text-xs font-bold px-3 py-2 rounded-xl shadow-md border border-slate-200 transition-all"
+        >
+          🎯 ตำแหน่งปัจจุบันของฉัน
+        </button>
+      </div>
+    </div>
   );
 }

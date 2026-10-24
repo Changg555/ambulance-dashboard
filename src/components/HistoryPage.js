@@ -1,56 +1,116 @@
 import React, { useMemo, useState } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
+import { toMillis } from "../hooks/useIncidents";
+import ReporterDetailModal from "./ReporterDetailModal";
 
-// ป้ายกำกับประเภทเหตุฉุกเฉินที่ใช้แสดงบนหน้าประวัติ
+// ป้ายกำกับประเภทเหตุฉุกเฉิน อิงจากฝั่ง Mobile (src/constants/incident.js)
 const TYPE_LABELS = {
-  vehicle_accident: "🚗 อุบัติเหตุรถ",
-  cardiac: "💛 หัวใจ/หมดสติ",
-  injury: "🩹 บาดเจ็บ/ล้มหกล้ม",
+  sos: "🚨 แจ้งเหตุด่วน (SOS)",
+  car_accident: "🚗 อุบัติเหตุรถ",
+  cardiac: "❤️ หัวใจ/หมดสติ",
+  injury: "🩹 บาดเจ็บ",
   fire: "🔥 ไฟไหม้",
-  other: "⚠️ อื่น ๆ",
+  drowning: "🌊 จมน้ำ",
+  other: "⚠️ เหตุอื่น ๆ",
 };
 
-// ป้ายกำกับสถานะของเคสหลัง normalize แล้ว
+const TYPE_PLAIN_LABELS = {
+  sos: "แจ้งเหตุด่วน (SOS)",
+  car_accident: "อุบัติเหตุรถ",
+  cardiac: "หัวใจ/หมดสติ",
+  injury: "บาดเจ็บ",
+  fire: "ไฟไหม้",
+  drowning: "จมน้ำ",
+  other: "เหตุอื่น ๆ",
+};
+
+const SEVERITY_LABELS = {
+  low: "ไม่รุนแรง",
+  medium: "ปานกลาง",
+  high: "รุนแรง",
+  critical: "วิกฤต",
+};
+
+const SEVERITY_RANK = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+};
+
+// ป้ายกำกับสถานะของเคส อิงตามฝั่ง Mobile
 const STATUS_LABELS = {
-  pending: "รอดำเนินการ",
-  accepted: "รับเคสแล้ว",
-  en_route: "กำลังเดินทาง",
-  arrived: "ถึงจุดเกิดเหตุ",
-  completed: "เสร็จสิ้น",
-  cancelled: "ยกเลิกเคส",
+  pending: "รอเจ้าหน้าที่รับเรื่อง",
+  accepted: "เจ้าหน้าที่รับเรื่องแล้ว",
+  on_the_way: "กำลังเดินทางไปหาคุณ",
+  arrived: "ถึงจุดเกิดเหตุแล้ว",
+  completed: "ช่วยเหลือเสร็จสิ้น",
+  cancelled: "ยกเลิกแล้ว",
 };
 
-// ตัวเลือกสถานะใน dropdown filter
+// ตัวเลือกสถานะใน dropdown filter (หน้าประวัติแสดงเฉพาะ ทุกสถานะ, เสร็จสิ้น, ยกเลิก)
 const STATUS_FILTER_OPTIONS = [
   { value: "all", label: "ทุกสถานะ" },
-  { value: "completed", label: "เสร็จสิ้น" },
-  { value: "cancelled", label: "ยกเลิกเคส" },
-  { value: "accepted", label: "รับเคสแล้ว" },
-  { value: "en_route", label: "กำลังเดินทาง" },
-  { value: "arrived", label: "ถึงจุดเกิดเหตุ" },
+  { value: "completed", label: "ช่วยเหลือเสร็จสิ้น" },
+  { value: "cancelled", label: "ยกเลิกแล้ว" },
+];
+
+const SEVERITY_FILTER_OPTIONS = [
+  { value: "all", label: "ทุกระดับความรุนแรง" },
+  { value: "critical", label: "🔴 วิกฤต (Critical)" },
+  { value: "high", label: "🟠 รุนแรง (High)" },
+  { value: "medium", label: "🟡 ปานกลาง (Medium)" },
+  { value: "low", label: "🟢 ไม่รุนแรง (Low)" },
+];
+
+const TYPE_FILTER_OPTIONS = [
+  { value: "all", label: "ทุกประเภทเหตุฉุกเฉิน" },
+  { value: "car_accident", label: "🚗 อุบัติเหตุรถ" },
+  { value: "cardiac", label: "❤️ หัวใจ/หมดสติ" },
+  { value: "injury", label: "🩹 บาดเจ็บ" },
+  { value: "fire", label: "🔥 ไฟไหม้" },
+  { value: "drowning", label: "🌊 จมน้ำ" },
+  { value: "sos", label: "🚨 แจ้งเหตุด่วน (SOS)" },
+  { value: "other", label: "⚠️ เหตุอื่น ๆ" },
+];
+
+const SORT_OPTIONS = [
+  { value: "newest", label: "🕒 เรียงตามเวลาแจ้งล่าสุด" },
+  { value: "severity_desc", label: "🔥 ความรุนแรง: วิกฤต → ไม่รุนแรง" },
+  { value: "severity_asc", label: "🟢 ความรุนแรง: ไม่รุนแรง → วิกฤต" },
+  { value: "oldest", label: "⏳ เรียงตามเวลาแจ้งเก่าสุด" },
+];
+
+const DATE_PRESETS = [
+  { value: "all", label: "ทั้งหมด" },
+  { value: "today", label: "วันนี้" },
+  { value: "week", label: "สัปดาห์นี้" },
+  { value: "month", label: "เดือนนี้" },
+  { value: "custom", label: "กำหนดช่วงวันที่เอง" },
 ];
 
 // class กลางของ input/select เพื่อไม่ต้องเขียนซ้ำหลายจุด
 const CONTROL_CLASS =
-  "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all";
-
-// แปลงชื่อสถานะเก่าให้เป็นรูปแบบเดียวกับหน้าปัจจุบัน
-function normalizeStatus(status) {
-  if (status === "on_the_way") return "en_route";
-  return status || "pending";
-}
+  "bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all";
 
 // แสดงวันที่/เวลาในรูปแบบไทย และกันค่าว่างไม่ให้ UI พัง
 function formatDate(time) {
-  if (!time) return "-";
-  return new Date(time).toLocaleString("th-TH");
+  const ms = toMillis(time);
+  if (!ms) return "-";
+  return new Date(ms).toLocaleString("th-TH");
+}
+
+function getDurationMinutes(start, end) {
+  const startMs = toMillis(start);
+  const endMs = toMillis(end);
+  if (!startMs || !endMs || endMs < startMs) return null;
+  return Math.round((endMs - startMs) / 60000);
 }
 
 // คำนวณเวลาที่ใช้ตั้งแต่เปิดเคสจนถึงปิดหรือยกเลิกเคส
 function getDuration(start, end) {
-  if (!start || !end) return "-";
-
-  const minutes = Math.round((end - start) / 60000);
+  const minutes = getDurationMinutes(start, end);
+  if (minutes === null) return "-";
   if (minutes < 60) return `${minutes} นาที`;
 
   const hours = Math.floor(minutes / 60);
@@ -58,28 +118,210 @@ function getDuration(start, end) {
   return `${hours} ชม. ${remainMinutes} นาที`;
 }
 
-// รวมรูปจาก schema เก่าและใหม่ให้เป็น array เดียว
+// รวมรูปจากฝั่ง Mobile ({ url, publicId }) และ schema เดิมให้เป็น array ของ URL
 function getIncidentImages(item) {
-  return item.images || (item.image ? [item.image] : []);
+  const raw = item.images || (item.image ? [item.image] : []);
+  return raw
+    .map((img) => (typeof img === "string" ? img : img?.url))
+    .filter(Boolean);
 }
 
 // เช็คว่าข้อมูลตำแหน่งมีพิกัดครบพอสำหรับแสดงแผนที่หรือไม่
-function hasCoordinates(location) {
-  return Boolean(location?.lat && location?.lng);
+function getCoords(location) {
+  const lat = Number(location?.latitude ?? location?.lat);
+  const lng = Number(location?.longitude ?? location?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+    return null;
+  }
+  return { lat, lng };
 }
 
-// เตรียมข้อความรวมสำหรับ search ในจุดเดียว เพื่อลด logic ซ้ำใน filter
+// เตรียมข้อความรวมสำหรับ search ในจุดเดียว
 function getSearchText(item) {
   return [
     item.caseNumber,
     item.id,
     item.type,
+    TYPE_LABELS[item.type],
+    SEVERITY_LABELS[item.severity],
     item.description,
+    item.address,
     item.location?.address,
+    item.reporter?.name,
+    item.reporter?.phone,
+    item.assignedTo?.name,
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+// ตรวจสอบว่าเวลาของเคสอยู่ในช่วงเวลาที่เลือกหรือไม่
+function isWithinDateRange(createdAtMs, datePreset, customStart, customEnd) {
+  if (datePreset === "all") return true;
+  if (!createdAtMs) return false;
+
+  const now = new Date();
+
+  if (datePreset === "today") {
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const endOfToday = startOfToday + 24 * 60 * 60 * 1000 - 1;
+    return createdAtMs >= startOfToday && createdAtMs <= endOfToday;
+  }
+
+  if (datePreset === "week") {
+    const dayOfWeek = now.getDay(); // 0 (Sun) - 6 (Sat)
+    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const startOfWeek = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - diffToMonday
+    ).getTime();
+    const endOfToday =
+      new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() +
+      24 * 60 * 60 * 1000 -
+      1;
+    return createdAtMs >= startOfWeek && createdAtMs <= endOfToday;
+  }
+
+  if (datePreset === "month") {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const endOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    ).getTime();
+    return createdAtMs >= startOfMonth && createdAtMs <= endOfMonth;
+  }
+
+  if (datePreset === "custom") {
+    let minMs = -Infinity;
+    let maxMs = Infinity;
+    if (customStart) {
+      const [y, m, d] = customStart.split("-").map(Number);
+      minMs = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+    }
+    if (customEnd) {
+      const [y, m, d] = customEnd.split("-").map(Number);
+      maxMs = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+    }
+    return createdAtMs >= minMs && createdAtMs <= maxMs;
+  }
+
+  return true;
+}
+
+// ฟังก์ชันแปลงข้อมูลเคสเป็น CSV (รองรับภาษาไทยใน Excel ด้วย UTF-8 BOM)
+function exportIncidentsToCsv(
+  incidents,
+  datePreset,
+  customStart,
+  customEnd,
+  typeFilter = "all",
+  severityFilter = "all"
+) {
+  const escapeCsvCell = (val) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const headers = [
+    "ลำดับ",
+    "เลขเคส",
+    "วันที่แจ้งเหตุ",
+    "เวลาแจ้งเหตุ",
+    "ประเภทเหตุฉุกเฉิน",
+    "ระดับความรุนแรง",
+    "สถานะ",
+    "ชื่อผู้แจ้งเหตุ",
+    "เบอร์โทรผู้แจ้ง",
+    "เจ้าหน้าที่ผู้รับผิดชอบ",
+    "รถปฏิบัติการ",
+    "รายละเอียดอาการ/เหตุการณ์",
+    "สถานที่เกิดเหตุ",
+    "พิกัด (Latitude, Longitude)",
+    "เวลาเสร็จสิ้น/ยกเลิก",
+    "เวลาที่ใช้ (นาที)",
+  ];
+
+  const rows = incidents.map((item, idx) => {
+    const createdMs = toMillis(item.createdAt);
+    const createdDateObj = createdMs ? new Date(createdMs) : null;
+    const dateStr = createdDateObj
+      ? createdDateObj.toLocaleDateString("th-TH")
+      : "-";
+    const timeStr = createdDateObj
+      ? createdDateObj.toLocaleTimeString("th-TH")
+      : "-";
+
+    const caseNumber =
+      item.caseNumber || `KPS-${(item.id || "").slice(0, 8).toUpperCase()}`;
+    const typeLabel = TYPE_PLAIN_LABELS[item.type] || item.type || "ไม่ระบุประเภท";
+    const severityLabel = SEVERITY_LABELS[item.severity] || "ไม่ระบุ";
+    const statusLabel = STATUS_LABELS[item.status] || item.status || "-";
+    const reporterName = item.reporter?.name || "-";
+    const reporterPhone = item.reporter?.phone ? `'${item.reporter.phone}` : "-";
+    const staffName = item.assignedTo?.name || "-";
+    const staffVehicle = item.assignedTo?.vehicle || "-";
+    const description = item.description || "-";
+    const address = item.address || item.location?.address || "ไม่ทราบตำแหน่ง";
+    const coords = getCoords(item.location);
+    const coordsStr = coords
+      ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`
+      : "-";
+    const endTime = formatDate(item.completedAt || item.cancelledAt);
+    const durationMin = getDurationMinutes(
+      item.createdAt,
+      item.completedAt || item.cancelledAt
+    );
+
+    return [
+      idx + 1,
+      caseNumber,
+      dateStr,
+      timeStr,
+      typeLabel,
+      severityLabel,
+      statusLabel,
+      reporterName,
+      reporterPhone,
+      staffName,
+      staffVehicle,
+      description,
+      address,
+      coordsStr,
+      endTime,
+      durationMin !== null ? durationMin : "-",
+    ]
+      .map(escapeCsvCell)
+      .join(",");
+  });
+
+  const csvContent = "\uFEFF" + [headers.map(escapeCsvCell).join(","), ...rows].join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const rangeSuffix =
+    datePreset === "custom" && (customStart || customEnd)
+      ? `${customStart || "start"}_to_${customEnd || "end"}`
+      : datePreset;
+  const typeSuffix = typeFilter !== "all" ? `_${typeFilter}` : "";
+  const sevSuffix = severityFilter !== "all" ? `_${severityFilter}` : "";
+  const filename = `KPS_Emergency_Report_${rangeSuffix}${typeSuffix}${sevSuffix}_${todayIso}.csv`;
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 // ป้ายสถานะขนาดเล็กที่ใช้ซ้ำทั้ง archived/status
@@ -87,6 +329,8 @@ function StatusBadge({ children, tone = "slate" }) {
   const toneClass = {
     amber: "bg-amber-100 text-amber-700",
     emerald: "bg-emerald-100 text-emerald-700",
+    orange: "bg-orange-100 text-orange-700",
+    red: "bg-red-100 text-red-700",
     slate: "bg-slate-100 text-slate-600",
   }[tone];
 
@@ -138,11 +382,12 @@ function IncidentTimeline({ timeline }) {
   return (
     <div className="space-y-0">
       {timeline.map((log, index) => {
-        const status = normalizeStatus(log.status);
+        const status = log.status || "pending";
         const isLast = index === timeline.length - 1;
+        const timeVal = log.time ?? log.at;
 
         return (
-          <div key={`${status}-${log.time || index}`} className="flex gap-3">
+          <div key={log.id || `${status}-${index}`} className="flex gap-3">
             <div className="flex flex-col items-center">
               <div
                 className={`w-2.5 h-2.5 rounded-full mt-1 ${
@@ -158,10 +403,10 @@ function IncidentTimeline({ timeline }) {
                   isLast ? "font-bold text-slate-800" : "font-semibold text-slate-500"
                 }`}
               >
-                {STATUS_LABELS[status] || log.label || status}
+                {log.note || log.label || STATUS_LABELS[status] || status}
               </span>
               <span className="text-[11px] font-medium text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100 whitespace-nowrap w-fit">
-                {formatDate(log.time)}
+                {formatDate(timeVal)}
               </span>
             </div>
           </div>
@@ -172,8 +417,9 @@ function IncidentTimeline({ timeline }) {
 }
 
 // แสดงตำแหน่งและปุ่มเปิด modal แผนที่ของเคส
-function IncidentLocation({ location, onPreviewMap }) {
-  const canOpenMap = hasCoordinates(location);
+function IncidentLocation({ item, onPreviewMap }) {
+  const address = item.address || item.location?.address || "ไม่ทราบตำแหน่ง";
+  const coords = getCoords(item.location);
 
   return (
     <div className="mt-3 bg-slate-50 rounded-xl border border-slate-100 p-3 w-fit max-w-full">
@@ -181,22 +427,20 @@ function IncidentLocation({ location, onPreviewMap }) {
         <div className="flex-1 min-w-0">
           <p className="text-[13px] font-medium text-slate-600 flex items-start gap-1.5 leading-snug">
             <span className="text-red-500 shrink-0 mt-[2px]">📍</span>
-            <span className="line-clamp-2">
-              {location?.address || "ไม่ทราบตำแหน่ง"}
-            </span>
+            <span className="line-clamp-2">{address}</span>
           </p>
 
-          {canOpenMap && (
+          {coords && (
             <p className="text-[11px] font-mono text-slate-400 mt-1 ml-5">
-              {Number(location.lat).toFixed(5)}, {Number(location.lng).toFixed(5)}
+              {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
             </p>
           )}
         </div>
 
-        {canOpenMap && (
+        {coords && (
           <button
             type="button"
-            onClick={() => onPreviewMap(location)}
+            onClick={() => onPreviewMap({ ...coords, address })}
             className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-all shadow-sm"
           >
             <span>🗺️</span> แผนที่
@@ -233,7 +477,7 @@ function IncidentTimeStats({ item }) {
   );
 }
 
-// ปุ่ม action ด้านล่างของ card แยกออกมาเพื่อลดความยาวของ component หลัก
+// ปุ่ม action ด้านล่างของ card
 function IncidentActions({ item, role, onRestore, onDelete }) {
   const canDelete = role === "admin";
 
@@ -267,7 +511,7 @@ function IncidentActions({ item, role, onRestore, onDelete }) {
   );
 }
 
-// card หลักของเคสหนึ่งรายการ รวมเฉพาะ layout และเรียก component ย่อยที่แยกไว้
+// card หลักของเคสหนึ่งรายการ
 function IncidentHistoryCard({
   item,
   onRestore,
@@ -276,104 +520,302 @@ function IncidentHistoryCard({
   onPreviewMap,
   role,
 }) {
-  const status = normalizeStatus(item.status);
+  const [showReporterModal, setShowReporterModal] = useState(false);
+  const status = item.status || "pending";
   const isCancelled = status === "cancelled";
-  const caseNumber = item.caseNumber || item.id?.slice(0, 8);
+  const caseNumber = item.caseNumber || `KPS-${item.id?.slice(0, 8).toUpperCase()}`;
+  const reporterUid = item.reporter?.uid || item.userId || null;
+
+  const severityTone =
+    item.severity === "critical"
+      ? "red"
+      : item.severity === "high"
+      ? "orange"
+      : item.severity === "medium"
+      ? "amber"
+      : "emerald";
 
   return (
-    <div className="border border-slate-200 rounded-2xl p-5 bg-white hover:shadow-md transition-shadow">
-      <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 flex-wrap mb-2">
-            <h3 className="font-bold text-slate-800 text-lg">
-              {TYPE_LABELS[item.type] || item.type || "ไม่ระบุประเภท"}
-            </h3>
-            <StatusBadge tone={isCancelled ? "slate" : "emerald"}>
-              {STATUS_LABELS[status] || status}
-            </StatusBadge>
-            {item.archived && <StatusBadge tone="amber">เก็บประวัติแล้ว</StatusBadge>}
+    <>
+      <div className="border border-slate-200 rounded-2xl p-5 bg-white hover:shadow-md transition-shadow">
+        <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 flex-wrap mb-2">
+              <h3 className="font-bold text-slate-800 text-lg">
+                {TYPE_LABELS[item.type] || item.type || "ไม่ระบุประเภท"}
+              </h3>
+              <StatusBadge tone={isCancelled ? "slate" : "emerald"}>
+                {STATUS_LABELS[status] || status}
+              </StatusBadge>
+              {item.severity && SEVERITY_LABELS[item.severity] && (
+                <StatusBadge tone={severityTone}>
+                  ความรุนแรง: {SEVERITY_LABELS[item.severity]}
+                </StatusBadge>
+              )}
+              {item.archived && <StatusBadge tone="amber">เก็บประวัติแล้ว</StatusBadge>}
+            </div>
+
+            <p className="text-xs font-bold text-red-500 bg-red-50 inline-block px-2 py-1 rounded-md font-mono mb-2">
+              {caseNumber}
+            </p>
+
+            {(item.reporter || item.assignedTo || reporterUid) && (
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 mt-1 mb-2">
+                {(item.reporter || reporterUid) && (
+                  <span className="flex items-center gap-2 flex-wrap">
+                    <span>
+                      👤 ผู้แจ้ง: <strong>{item.reporter?.name || "-"}</strong>{" "}
+                      {item.reporter?.phone ? `(${item.reporter.phone})` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowReporterModal(true)}
+                      className="text-[11px] font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-lg shadow-sm transition flex items-center gap-1"
+                    >
+                      <span>🪪</span> ดูข้อมูลผู้แจ้ง
+                    </button>
+                  </span>
+                )}
+                {item.assignedTo && (
+                  <span>
+                    🚑 เจ้าหน้าที่: <strong>{item.assignedTo.name || "-"}</strong>
+                    {item.assignedTo.vehicle ? ` (${item.assignedTo.vehicle})` : ""}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {item.description && (
+              <p className="text-sm font-medium text-slate-600 mt-2 bg-slate-50 p-3 rounded-xl border border-slate-100 w-fit max-w-full">
+                {item.description}
+              </p>
+            )}
+
+            <IncidentLocation item={item} onPreviewMap={onPreviewMap} />
+            <HistoryImages item={item} onPreview={onPreviewImage} />
           </div>
 
-          <p className="text-xs font-bold text-red-500 bg-red-50 inline-block px-2 py-1 rounded-md font-mono mb-2">
-            #{caseNumber}
-          </p>
-
-          <p className="text-sm font-medium text-slate-600 mt-2 bg-slate-50 p-3 rounded-xl border border-slate-100 w-fit max-w-full">
-            {item.description || "ไม่มีรายละเอียด"}
-          </p>
-
-          <IncidentLocation location={item.location} onPreviewMap={onPreviewMap} />
-          <HistoryImages item={item} onPreview={onPreviewImage} />
+          <IncidentTimeStats item={item} />
         </div>
 
-        <IncidentTimeStats item={item} />
+        <div className="mt-6 pt-5 border-t border-slate-100">
+          <p className="text-[11px] font-bold text-slate-500 mb-4 uppercase tracking-wider flex items-center gap-1.5">
+            <span className="text-red-500 text-sm">⏱</span> Timeline เหตุการณ์
+          </p>
+          <IncidentTimeline timeline={item.timeline} />
+        </div>
+
+        <IncidentActions
+          item={item}
+          role={role}
+          onRestore={onRestore}
+          onDelete={onDelete}
+        />
       </div>
 
-      <div className="mt-6 pt-5 border-t border-slate-100">
-        <p className="text-[11px] font-bold text-slate-500 mb-4 uppercase tracking-wider flex items-center gap-1.5">
-          <span className="text-red-500 text-sm">⏱</span> Timeline เหตุการณ์
-        </p>
-        <IncidentTimeline timeline={item.timeline} />
-      </div>
-
-      <IncidentActions
-        item={item}
+      <ReporterDetailModal
+        isOpen={showReporterModal}
+        onClose={() => setShowReporterModal(false)}
+        reporterUid={reporterUid}
+        fallbackReporter={item.reporter}
+        incidentId={item.id}
         role={role}
-        onRestore={onRestore}
-        onDelete={onDelete}
       />
-    </div>
+    </>
   );
 }
 
-// toolbar ด้านบนสำหรับค้นหา กรองสถานะ และลบหลายรายการสำหรับ admin
+// toolbar ด้านบนสำหรับค้นหา กรองช่วงเวลา กรองสถานะ/ประเภทเหตุ/ความรุนแรง เรียงลำดับ และส่งออกรายงาน CSV
 function HistoryToolbar({
   search,
   statusFilter,
+  typeFilter,
+  severityFilter,
+  sortBy,
+  datePreset,
+  customStartDate,
+  customEndDate,
   resultCount,
   role,
   onSearchChange,
   onStatusChange,
+  onTypeChange,
+  onSeverityChange,
+  onSortChange,
+  onDatePresetChange,
+  onCustomStartChange,
+  onCustomEndChange,
+  onExportCsv,
   onBulkDelete,
 }) {
   return (
-    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
-      <div className="shrink-0">
-        <h2 className="text-xl font-bold text-slate-800">ประวัติย้อนหลัง</h2>
-        <p className="text-sm font-medium text-slate-500 mt-1">
-          เคสที่เสร็จสิ้น ยกเลิก หรือถูกเก็บเข้าประวัติ
-        </p>
-      </div>
+    <div className="space-y-4 mb-6 pb-5 border-b border-slate-100">
+      {/* แถวบน: หัวข้อ + ปุ่มส่งออกรายงาน CSV + ปุ่มลบทั้งหมด */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            ประวัติย้อนหลัง
+            <span className="text-xs font-bold bg-red-50 text-red-600 px-2.5 py-1 rounded-full">
+              พบ {resultCount} เคส
+            </span>
+          </h2>
+          <p className="text-sm font-medium text-slate-500 mt-1">
+            เลือกกรองช่วงเวลา ประเภทเหตุฉุกเฉิน และระดับความรุนแรง เพื่อดูข้อมูลหรือส่งออกรายงาน CSV เฉพาะเรื่อง
+          </p>
+        </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 flex-1 xl:justify-end w-full">
-        <input
-          className={`flex-1 sm:w-auto ${CONTROL_CLASS}`}
-          placeholder="ค้นหาเลขเคส / ประเภทเหตุ / สถานที่"
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-        />
-
-        <select
-          className={`sm:w-auto shrink-0 ${CONTROL_CLASS}`}
-          value={statusFilter}
-          onChange={(event) => onStatusChange(event.target.value)}
-        >
-          {STATUS_FILTER_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-
-        {role === "admin" && resultCount > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
-            onClick={onBulkDelete}
-            className="w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 bg-red-50 border border-red-100 text-red-600 hover:bg-red-500 hover:text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
+            onClick={onExportCsv}
+            disabled={resultCount === 0}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
           >
-            <span>🗑️</span> ลบทั้งหมด
+            <span>📥</span> ส่งออกรายงาน CSV ({resultCount} เคส)
           </button>
+
+          {role === "admin" && resultCount > 0 && (
+            <button
+              type="button"
+              onClick={onBulkDelete}
+              className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-600 hover:bg-red-500 hover:text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
+            >
+              <span>🗑️</span> ลบที่แสดง ({resultCount})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* แถวตัวกรองช่วงเวลา (Date Range Picker) */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-50/80 p-3 rounded-2xl border border-slate-200/80">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1">
+            📅 ช่วงเวลา:
+          </span>
+          {DATE_PRESETS.map((preset) => {
+            const active = datePreset === preset.value;
+            return (
+              <button
+                key={preset.value}
+                type="button"
+                onClick={() => onDatePresetChange(preset.value)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  active
+                    ? "bg-red-500 text-white shadow-sm"
+                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                }`}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {datePreset === "custom" && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-600">ตั้งแต่:</span>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => onCustomStartChange(e.target.value)}
+                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:border-red-500"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-600">ถึง:</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => onCustomEndChange(e.target.value)}
+                className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:border-red-500"
+              />
+            </div>
+          </div>
         )}
+      </div>
+
+      {/* แถวค้นหา + กรองประเภทเหตุฉุกเฉิน + กรองระดับความรุนแรง + กรองสถานะ + เรียงลำดับเคส */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] font-bold text-slate-500 px-1">
+            🔍 ค้นหาข้อความ
+          </label>
+          <input
+            className={CONTROL_CLASS}
+            placeholder="เลขเคส / ผู้แจ้ง / สถานที่..."
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] font-bold text-slate-500 px-1">
+            🚨 ประเภทเหตุฉุกเฉิน
+          </label>
+          <select
+            className={CONTROL_CLASS}
+            value={typeFilter}
+            onChange={(event) => onTypeChange(event.target.value)}
+          >
+            {TYPE_FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] font-bold text-slate-500 px-1">
+            ⚠️ ระดับความรุนแรง
+          </label>
+          <select
+            className={CONTROL_CLASS}
+            value={severityFilter}
+            onChange={(event) => onSeverityChange(event.target.value)}
+          >
+            {SEVERITY_FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] font-bold text-slate-500 px-1">
+            📌 สถานะการดำเนินงาน
+          </label>
+          <select
+            className={CONTROL_CLASS}
+            value={statusFilter}
+            onChange={(event) => onStatusChange(event.target.value)}
+          >
+            {STATUS_FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] font-bold text-slate-500 px-1">
+            ↕️ เรียงลำดับเคส
+          </label>
+          <select
+            className={CONTROL_CLASS}
+            value={sortBy}
+            onChange={(event) => onSortChange(event.target.value)}
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
     </div>
   );
@@ -384,7 +826,7 @@ function EmptyHistoryState() {
   return (
     <div className="text-center py-16">
       <span className="text-4xl opacity-50 mb-3 block">📭</span>
-      <p className="text-slate-500 font-medium">ไม่พบประวัติเคสที่ค้นหา</p>
+      <p className="text-slate-500 font-medium">ไม่พบประวัติเคสในช่วงเวลาหรือเงื่อนไขที่ค้นหา</p>
     </div>
   );
 }
@@ -474,10 +916,17 @@ function MapPreviewModal({ location, onClose, isLoaded }) {
   );
 }
 
-// component หลัก: จัดการ state การค้นหา/filter/modal และส่งข้อมูลให้ component ย่อย
+// component หลัก: จัดการ state การค้นหา/filter/date range/sort/export และส่งข้อมูลให้ component ย่อย
 export default function HistoryPage({ incidents = [], onRestore, onDelete, role }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
+  const [datePreset, setDatePreset] = useState("all");
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
+
   const [previewImage, setPreviewImage] = useState(null);
   const [previewMap, setPreviewMap] = useState(null);
 
@@ -485,18 +934,72 @@ export default function HistoryPage({ incidents = [], onRestore, onDelete, role 
     googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_KEY,
   });
 
-  // กรองรายการตามคำค้นหาและสถานะ โดย cache ผลลัพธ์ไว้จนกว่า input จะเปลี่ยน
+  // กรองรายการตามคำค้นหา ประเภทเหตุ สถานะ ความรุนแรง และช่วงเวลา พร้อมเรียงลำดับ
   const filteredIncidents = useMemo(() => {
     const keyword = search.trim().toLowerCase();
 
-    return incidents.filter((item) => {
-      const status = normalizeStatus(item.status);
+    const filtered = incidents.filter((item) => {
+      const status = item.status || "pending";
       const matchSearch = !keyword || getSearchText(item).includes(keyword);
       const matchStatus = statusFilter === "all" || status === statusFilter;
+      const matchType =
+        typeFilter === "all" || item.type === typeFilter;
+      const matchSeverity =
+        severityFilter === "all" || item.severity === severityFilter;
+      const matchDate = isWithinDateRange(
+        toMillis(item.createdAt),
+        datePreset,
+        customStartDate,
+        customEndDate
+      );
 
-      return matchSearch && matchStatus;
+      return (
+        matchSearch && matchStatus && matchType && matchSeverity && matchDate
+      );
     });
-  }, [incidents, search, statusFilter]);
+
+    return [...filtered].sort((a, b) => {
+      const rankA = SEVERITY_RANK[a.severity] || 0;
+      const rankB = SEVERITY_RANK[b.severity] || 0;
+      const timeA = toMillis(a.createdAt) || 0;
+      const timeB = toMillis(b.createdAt) || 0;
+
+      if (sortBy === "severity_desc") {
+        if (rankB !== rankA) return rankB - rankA;
+        return timeB - timeA;
+      }
+      if (sortBy === "severity_asc") {
+        if (rankA !== rankB) return rankA - rankB;
+        return timeB - timeA;
+      }
+      if (sortBy === "oldest") {
+        return timeA - timeB;
+      }
+      return timeB - timeA;
+    });
+  }, [
+    incidents,
+    search,
+    statusFilter,
+    typeFilter,
+    severityFilter,
+    sortBy,
+    datePreset,
+    customStartDate,
+    customEndDate,
+  ]);
+
+  const handleExportCsv = () => {
+    if (filteredIncidents.length === 0) return;
+    exportIncidentsToCsv(
+      filteredIncidents,
+      datePreset,
+      customStartDate,
+      customEndDate,
+      typeFilter,
+      severityFilter
+    );
+  };
 
   // ลบรายการที่กำลังแสดงทั้งหมด โดยถามยืนยันก่อนเพื่อกันการลบถาวรโดยไม่ตั้งใจ
   const handleBulkDelete = () => {
@@ -515,10 +1018,23 @@ export default function HistoryPage({ incidents = [], onRestore, onDelete, role 
         <HistoryToolbar
           search={search}
           statusFilter={statusFilter}
+          typeFilter={typeFilter}
+          severityFilter={severityFilter}
+          sortBy={sortBy}
+          datePreset={datePreset}
+          customStartDate={customStartDate}
+          customEndDate={customEndDate}
           resultCount={filteredIncidents.length}
           role={role}
           onSearchChange={setSearch}
           onStatusChange={setStatusFilter}
+          onTypeChange={setTypeFilter}
+          onSeverityChange={setSeverityFilter}
+          onSortChange={setSortBy}
+          onDatePresetChange={setDatePreset}
+          onCustomStartChange={setCustomStartDate}
+          onCustomEndChange={setCustomEndDate}
+          onExportCsv={handleExportCsv}
           onBulkDelete={handleBulkDelete}
         />
 

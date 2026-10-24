@@ -1,19 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
-import { ref, onValue, update, remove } from "firebase/database";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch,
+} from "firebase/firestore";
 import { db } from "../config/firebase";
 
-const STATUS_LABELS = {
-  pending: "แจ้งเหตุ",
-  accepted: "เจ้าหน้าที่รับเคส",
-  en_route: "รถพยาบาลกำลังเดินทาง",
-  arrived: "ถึงจุดเกิดเหตุ",
-  completed: "เสร็จสิ้นเคส",
-  cancelled: "ยกเลิกเคส",
+// ข้อความสถานะฝั่ง Mobile (src/constants/incident.js)
+export const MOBILE_STATUS_LABEL = {
+  pending: "รอเจ้าหน้าที่รับเรื่อง",
+  accepted: "เจ้าหน้าที่รับเรื่องแล้ว",
+  on_the_way: "กำลังเดินทางไปหาคุณ",
+  arrived: "ถึงจุดเกิดเหตุแล้ว",
+  completed: "ช่วยเหลือเสร็จสิ้น",
+  cancelled: "ยกเลิกแล้ว",
 };
 
-function normalizeStatus(status) {
-  if (status === "on_the_way") return "en_route";
-  return status || "pending";
+// แปลงค่าเวลา (Firestore Timestamp / Date / number / ISO string) ให้เป็น milliseconds
+export function toMillis(val) {
+  if (!val) return null;
+  if (typeof val === "number") return val;
+  if (typeof val?.toMillis === "function") return val.toMillis();
+  if (typeof val?.seconds === "number") return val.seconds * 1000;
+  const parsed = new Date(val).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function calcDistance(lat1, lng1, lat2, lng2) {
@@ -30,62 +47,228 @@ function calcDistance(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export function useIncidents() {
+export function useIncidents({ user, profile } = {}) {
   const [incidentsRaw, setIncidentsRaw] = useState([]);
+  const [timelinesMap, setTimelinesMap] = useState({});
   const [serviceArea, setServiceArea] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [permissionError, setPermissionError] = useState(null);
+  const timelineUnsubsRef = useRef({});
 
+  // ดึงข้อมูลเหตุฉุกเฉินจาก Firestore คอลเลกชัน "incidents"
   useEffect(() => {
-    const incidentsRef = ref(db, "incidents");
+    let fallbackUnsub = null;
 
-    const unsub = onValue(incidentsRef, (snapshot) => {
-      const data = snapshot.val() || {};
+    const handleSnapshot = (snapshot) => {
+      const list = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
+        const id = docSnap.id;
 
-      const list = Object.entries(data)
-        .map(([id, value]) => ({
+        const lat = Number(data.location?.latitude ?? data.location?.lat);
+        const lng = Number(data.location?.longitude ?? data.location?.lng);
+        const hasValidCoords =
+          Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+        const address = data.address || data.location?.address || "";
+        const rawType = data.type || "other";
+        const normalizedType =
+          rawType === "vehicle_accident" ? "car_accident" : rawType;
+
+        return {
           id,
-          ...value,
-          status: normalizeStatus(value.status),
-        }))
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          ...data,
+          type: normalizedType,
+          caseNumber: data.caseNumber || `KPS-${id.slice(0, 8).toUpperCase()}`,
+          status: data.status || "pending",
+          address,
+          location: {
+            ...data.location,
+            latitude: hasValidCoords ? lat : null,
+            longitude: hasValidCoords ? lng : null,
+            lat: hasValidCoords ? lat : null,
+            lng: hasValidCoords ? lng : null,
+            address,
+          },
+          createdAt: toMillis(data.createdAt),
+          updatedAt: toMillis(data.updatedAt),
+          completedAt: toMillis(data.completedAt),
+          cancelledAt: toMillis(data.cancelledAt),
+          archivedAt: toMillis(data.archivedAt),
+        };
+      });
 
+      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setIncidentsRaw(list);
       setLoading(false);
-    });
 
-    return () => unsub();
-  }, []);
+      // จัดการ subscribe subcollection "timeline" ของแต่ละ incident
+      const currentIds = new Set(list.map((i) => i.id));
 
+      // ยกเลิก listener ของเคสที่ถูกลบไปแล้ว
+      Object.keys(timelineUnsubsRef.current).forEach((incId) => {
+        if (!currentIds.has(incId)) {
+          timelineUnsubsRef.current[incId]();
+          delete timelineUnsubsRef.current[incId];
+        }
+      });
+
+      // เพิ่ม listener สำหรับเคสใหม่
+      list.forEach((inc) => {
+        if (!timelineUnsubsRef.current[inc.id]) {
+          const tlQuery = query(
+            collection(db, "incidents", inc.id, "timeline"),
+            orderBy("at", "asc")
+          );
+          timelineUnsubsRef.current[inc.id] = onSnapshot(
+            tlQuery,
+            (tlSnap) => {
+              const tlItems = tlSnap.docs.map((d) => {
+                const tlData = d.data();
+                const st = tlData.status || "pending";
+                const timeMs = toMillis(tlData.at ?? tlData.time);
+                return {
+                  id: d.id,
+                  ...tlData,
+                  status: st,
+                  note: tlData.note || tlData.label || MOBILE_STATUS_LABEL[st] || st,
+                  label: tlData.note || tlData.label || MOBILE_STATUS_LABEL[st] || st,
+                  time: timeMs,
+                };
+              });
+              setTimelinesMap((prev) => ({ ...prev, [inc.id]: tlItems }));
+            },
+            (err) => console.warn("Timeline subscribe error:", err)
+          );
+        }
+      });
+    };
+
+    const incidentsRef = collection(db, "incidents");
+
+    const unsub = onSnapshot(
+      incidentsRef,
+      (snapshot) => {
+        setPermissionError(null);
+        handleSnapshot(snapshot);
+      },
+      (error) => {
+        console.error("Error subscribing to all incidents:", error);
+        setPermissionError(error.message || "Missing or insufficient permissions");
+
+        // Fallback: ถ้า Firestore Rules บล็อกการดึงเคสทั้งหมด ให้ลองดึงเฉพาะของ uid ปัจจุบัน
+        if (user?.uid) {
+          const myQuery = query(
+            collection(db, "incidents"),
+            where("userId", "==", user.uid)
+          );
+          fallbackUnsub = onSnapshot(
+            myQuery,
+            (snap) => handleSnapshot(snap),
+            () => setLoading(false)
+          );
+        } else {
+          setLoading(false);
+        }
+      }
+    );
+
+    return () => {
+      unsub();
+      if (fallbackUnsub) fallbackUnsub();
+      Object.values(timelineUnsubsRef.current).forEach((fn) => fn());
+      timelineUnsubsRef.current = {};
+    };
+  }, [user?.uid]);
+
+  // ดึงการตั้งค่าพื้นที่ให้บริการจาก Firestore: doc(db, "settings", "serviceArea") ตามฝั่ง Mobile
   useEffect(() => {
-    const areaRef = ref(db, "service_area");
+    const areaRef = doc(db, "settings", "serviceArea");
 
-    const unsub = onValue(areaRef, (snapshot) => {
-      setServiceArea(snapshot.val());
-    });
+    const unsub = onSnapshot(
+      areaRef,
+      (snap) => {
+        if (!snap.exists()) {
+          setServiceArea(null);
+          return;
+        }
+        const data = snap.data();
+        const centerLat = Number(data.center?.latitude ?? data.center?.lat);
+        const centerLng = Number(data.center?.longitude ?? data.center?.lng);
+        setServiceArea({
+          ...data,
+          center: {
+            latitude: centerLat,
+            longitude: centerLng,
+            lat: centerLat,
+            lng: centerLng,
+          },
+        });
+      },
+      (err) => console.warn("ServiceArea subscribe error:", err)
+    );
 
     return () => unsub();
   }, []);
 
   const incidents = useMemo(() => {
-    if (!serviceArea || serviceArea.enabled !== true) {
-      return incidentsRaw.map((item) => ({
-        ...item,
-        serviceAreaStatus: "not_configured",
-        isInsideServiceArea: null,
-      }));
-    }
-
-    const centerLat = Number(serviceArea.center?.lat);
-    const centerLng = Number(serviceArea.center?.lng);
-    const radius = Number(serviceArea.radius);
+    const areaEnabled =
+      serviceArea &&
+      serviceArea.enabled !== false &&
+      serviceArea.center &&
+      typeof serviceArea.radius === "number";
+    const centerLat = Number(serviceArea?.center?.latitude ?? serviceArea?.center?.lat);
+    const centerLng = Number(serviceArea?.center?.longitude ?? serviceArea?.center?.lng);
+    const radius = Number(serviceArea?.radius);
 
     return incidentsRaw.map((item) => {
-      const lat = Number(item.location?.lat);
-      const lng = Number(item.location?.lng);
+      const subTimeline = timelinesMap[item.id];
+      const legacyTimeline = Array.isArray(item.timeline)
+        ? item.timeline.map((t) => ({
+            ...t,
+            status: t.status || "pending",
+            time: toMillis(t.at ?? t.time),
+          }))
+        : [];
+      const timeline =
+        subTimeline && subTimeline.length > 0 ? subTimeline : legacyTimeline;
 
-      if (!lat || !lng) {
+      // หาก completedAt หรือ cancelledAt ไม่มีใน root doc ให้ดึงจาก timeline หรือ updatedAt
+      const completedEntry = timeline.find((t) => t.status === "completed");
+      const cancelledEntry = timeline.find((t) => t.status === "cancelled");
+      const completedAt =
+        item.completedAt ||
+        completedEntry?.time ||
+        (item.status === "completed" ? item.updatedAt : null);
+      const cancelledAt =
+        item.cancelledAt ||
+        cancelledEntry?.time ||
+        (item.status === "cancelled" ? item.updatedAt : null);
+
+      const enriched = {
+        ...item,
+        timeline,
+        completedAt,
+        cancelledAt,
+      };
+
+      if (
+        !areaEnabled ||
+        !Number.isFinite(centerLat) ||
+        !Number.isFinite(centerLng) ||
+        !Number.isFinite(radius)
+      ) {
         return {
-          ...item,
+          ...enriched,
+          serviceAreaStatus: "not_configured",
+          isInsideServiceArea: null,
+        };
+      }
+
+      const lat = Number(item.location?.latitude ?? item.location?.lat);
+      const lng = Number(item.location?.longitude ?? item.location?.lng);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+        return {
+          ...enriched,
           serviceAreaStatus: "unknown",
           isInsideServiceArea: null,
         };
@@ -95,13 +278,13 @@ export function useIncidents() {
       const isInside = distance <= radius;
 
       return {
-        ...item,
+        ...enriched,
         serviceAreaStatus: isInside ? "inside" : "outside",
         isInsideServiceArea: isInside,
         distanceFromServiceCenter: Math.round(distance),
       };
     });
-  }, [incidentsRaw, serviceArea]);
+  }, [incidentsRaw, timelinesMap, serviceArea]);
 
   const activeIncidents = useMemo(() => {
     return incidents.filter(
@@ -141,7 +324,8 @@ export function useIncidents() {
     );
 
     const completedWithTime = completedCases.filter(
-      (item) => item.createdAt && item.completedAt
+      (item) =>
+        item.createdAt && item.completedAt && item.completedAt >= item.createdAt
     );
 
     const avgResponseTime =
@@ -161,89 +345,108 @@ export function useIncidents() {
       active: activeCases.length,
       pending: incidents.filter((item) => item.status === "pending").length,
       accepted: incidents.filter((item) => item.status === "accepted").length,
-      en_route: incidents.filter((item) => item.status === "en_route").length,
+      on_the_way: incidents.filter((item) => item.status === "on_the_way").length,
       arrived: incidents.filter((item) => item.status === "arrived").length,
       completed: completedCases.length,
       cancelled: incidents.filter((item) => item.status === "cancelled").length,
       archived: incidents.filter((item) => item.archived).length,
-      inside: incidents.filter((item) => item.isInsideServiceArea === true)
-        .length,
-      outside: incidents.filter((item) => item.isInsideServiceArea === false)
-        .length,
+      inside: incidents.filter((item) => item.isInsideServiceArea === true).length,
+      outside: incidents.filter((item) => item.isInsideServiceArea === false).length,
       avgResponseTime,
     };
   }, [incidents]);
 
-  const updateStatus = async (incidentId, newStatus) => {
-    const fixedStatus = normalizeStatus(newStatus);
+  // อัปเดตสถานะเคสลง Firestore พร้อมเพิ่มข้อมูลใน subcollection "timeline" และระบุเจ้าหน้าที่ผู้รับผิดชอบ (assignedTo)
+  const updateStatus = async (incidentId, newStatus, customNote = null) => {
+    const firestoreStatus = newStatus || "pending";
     const incident = incidents.find((item) => item.id === incidentId);
-
     if (!incident) return;
 
-    const oldTimeline = Array.isArray(incident.timeline)
-      ? incident.timeline
-      : [];
-
-    const timelineItem = {
-      status: fixedStatus,
-      label: STATUS_LABELS[fixedStatus] || fixedStatus,
-      time: Date.now(),
-    };
+    const batch = writeBatch(db);
+    const incRef = doc(db, "incidents", incidentId);
+    const tlRef = doc(collection(db, "incidents", incidentId, "timeline"));
 
     const payload = {
-      status: fixedStatus,
-      updatedAt: Date.now(),
-      timeline: [...oldTimeline, timelineItem],
+      status: firestoreStatus,
+      updatedAt: serverTimestamp(),
     };
 
-    if (fixedStatus === "completed") {
-      payload.completedAt = Date.now();
+    // บันทึกข้อมูลเจ้าหน้าที่ที่รับผิดชอบ (แสดงบนหน้า StatusScreen ฝั่ง Mobile)
+    if ((firestoreStatus === "accepted" || !incident.assignedTo) && user) {
+      const staffName =
+        [profile?.firstname, profile?.lastname].filter(Boolean).join(" ") ||
+        profile?.name ||
+        user.displayName ||
+        user.email ||
+        "เจ้าหน้าที่กู้ชีพ";
+
+      payload.assignedTo = {
+        uid: user.uid,
+        name: staffName,
+        phone: profile?.phone || "",
+        vehicle: profile?.vehicle || "",
+      };
     }
 
-    await update(ref(db, `incidents/${incidentId}`), payload);
+    if (firestoreStatus === "completed") {
+      payload.completedAt = serverTimestamp();
+    }
+
+    batch.update(incRef, payload);
+    batch.set(tlRef, {
+      status: firestoreStatus,
+      note: customNote?.trim() || MOBILE_STATUS_LABEL[firestoreStatus] || firestoreStatus,
+      at: serverTimestamp(),
+    });
+
+    await batch.commit();
   };
 
+  // ยกเลิกเคสตามโครงสร้างเดียวกับ cancelIncident ฝั่ง Mobile
   const cancelIncident = async (incidentId) => {
     const incident = incidents.find((item) => item.id === incidentId);
-
     if (!incident) return;
 
-    const oldTimeline = Array.isArray(incident.timeline)
-      ? incident.timeline
-      : [];
+    const batch = writeBatch(db);
+    const incRef = doc(db, "incidents", incidentId);
+    const tlRef = doc(collection(db, "incidents", incidentId, "timeline"));
 
-    await update(ref(db, `incidents/${incidentId}`), {
+    batch.update(incRef, {
       status: "cancelled",
-      cancelledAt: Date.now(),
-      updatedAt: Date.now(),
-      timeline: [
-        ...oldTimeline,
-        {
-          status: "cancelled",
-          label: "ยกเลิกเคส",
-          time: Date.now(),
-        },
-      ],
+      cancelledAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
+
+    batch.set(tlRef, {
+      status: "cancelled",
+      note: MOBILE_STATUS_LABEL.cancelled,
+      at: serverTimestamp(),
+    });
+
+    await batch.commit();
   };
 
   const archiveIncident = async (incidentId) => {
-    await update(ref(db, `incidents/${incidentId}`), {
+    await updateDoc(doc(db, "incidents", incidentId), {
       archived: true,
-      archivedAt: Date.now(),
-      updatedAt: Date.now(),
+      archivedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
   };
 
   const restoreIncident = async (incidentId) => {
-    await update(ref(db, `incidents/${incidentId}`), {
+    await updateDoc(doc(db, "incidents", incidentId), {
       archived: false,
-      updatedAt: Date.now(),
+      updatedAt: serverTimestamp(),
     });
   };
 
   const deleteIncident = async (incidentId) => {
-    await remove(ref(db, `incidents/${incidentId}`));
+    const batch = writeBatch(db);
+    const tlSnap = await getDocs(collection(db, "incidents", incidentId, "timeline"));
+    tlSnap.docs.forEach((d) => batch.delete(d.ref));
+    batch.delete(doc(db, "incidents", incidentId));
+    await batch.commit();
   };
 
   return {
@@ -251,6 +454,7 @@ export function useIncidents() {
     activeIncidents,
     historyIncidents,
     loading,
+    permissionError,
     stats,
     serviceArea,
     updateStatus,

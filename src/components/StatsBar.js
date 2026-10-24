@@ -9,10 +9,16 @@ const STAT_ITEMS = [
     cardClassName: "bg-red-50/50 border-red-100",
   },
   {
-    key: "en_route",
+    key: "on_the_way",
     label: "กำลังเดินทาง",
     valueClassName: "text-amber-500",
     cardClassName: "bg-amber-50/50 border-amber-100",
+  },
+  {
+    key: "arrived",
+    label: "ถึงจุดเกิดเหตุ",
+    valueClassName: "text-teal-600",
+    cardClassName: "bg-teal-50/50 border-teal-100",
   },
   {
     key: "completed",
@@ -48,7 +54,7 @@ function StatCard({ label, value, valueClassName, cardClassName }) {
 // แถบสรุปสถานะเหตุการณ์ด้านบนของ dashboard
 export default function StatsBar({ stats }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-4 pt-4">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 px-4 pt-4">
       {STAT_ITEMS.map((item) => (
         <StatCard
           key={item.key}

@@ -1,35 +1,24 @@
-import React, { useEffect, useState } from "react";
-import { ref, onValue, set } from "firebase/database";
-import { GoogleMap, Marker, Circle, useJsApiLoader } from "@react-google-maps/api";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { GoogleMap, useJsApiLoader } from "@react-google-maps/api";
 import { db } from "../config/firebase";
 
-// ค่าเริ่มต้นของพื้นที่ให้บริการ ใช้ทั้งตอนเปิดหน้าครั้งแรกและตอน reset
+// ค่าเริ่มต้นของพื้นที่ให้บริการ (สถานพยาบาล ม.เกษตรฯ กำแพงแสน)
 const DEFAULT_AREA = {
   name: "มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน",
-  center: { lat: 14.0280249, lng: 99.9806146 },
+  center: { lat: 14.028746607870978, lng: 99.97823358223988 },
   radius: 1300,
   enabled: true,
 };
 
-// ข้อความแจ้งเตือนและ label ที่ใช้ซ้ำในหน้านี้
-const SERVICE_AREA_TEXT = {
-  title: "จัดการรัศมีพื้นที่ให้บริการ",
-  subtitle: "กำหนดขอบเขตที่ระบบจะถือว่าอยู่ในพื้นที่",
-  validationError: "กรุณากรอกข้อมูลให้ครบถ้วน",
-  saveSuccess: "บันทึกพื้นที่ให้บริการเรียบร้อยแล้ว",
-  saveError: "บันทึกไม่สำเร็จ",
-  resetConfirm: "ต้องการรีเซ็ตพื้นที่ให้บริการกลับเป็นค่าเริ่มต้นหรือไม่?",
-  resetSuccess: "รีเซ็ตค่าเริ่มต้นเรียบร้อยแล้ว",
-};
+const RADIUS_PRESETS = [
+  { label: "500 ม.", value: 500 },
+  { label: "1.0 กม.", value: 1000 },
+  { label: "1.3 กม. (ค่ามาตรฐาน)", value: 1300 },
+  { label: "2.0 กม.", value: 2000 },
+  { label: "3.0 กม.", value: 3000 },
+];
 
-// class กลางของ input เพื่อลดการเขียน Tailwind ซ้ำหลายช่อง
-const INPUT_CLASS =
-  "w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none";
-
-const COMPACT_INPUT_CLASS =
-  "w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-red-500/20 outline-none";
-
-// option ของ Google Map แยกไว้เพื่อไม่ให้ JSX หลักรก
 const MAP_OPTIONS = {
   mapTypeId: "hybrid",
   streetViewControl: false,
@@ -37,309 +26,450 @@ const MAP_OPTIONS = {
   fullscreenControl: true,
 };
 
-// label ของ marker จุดศูนย์กลางพื้นที่บริการ
 const CENTER_MARKER_LABEL = {
-  text: "ศูนย์กลาง",
+  text: "จุดศูนย์สั่งกลาง",
   color: "#FFFFFF",
   fontWeight: "bold",
-  fontSize: "14px",
+  fontSize: "12px",
 };
 
-// style ของวงรัศมีพื้นที่บริการบนแผนที่
 const SERVICE_CIRCLE_OPTIONS = {
   strokeColor: "#EF4444",
-  strokeOpacity: 0.8,
-  strokeWeight: 2,
+  strokeOpacity: 0.85,
+  strokeWeight: 2.5,
   fillColor: "#EF4444",
-  fillOpacity: 0.1,
+  fillOpacity: 0.15,
+  clickable: false,
 };
 
-// แปลงข้อมูลจาก Firebase ให้ครบ field และเป็นชนิดข้อมูลที่ UI ใช้งานได้
 function normalizeServiceArea(data) {
   if (!data) return DEFAULT_AREA;
+
+  const lat = Number(data.center?.latitude ?? data.center?.lat ?? DEFAULT_AREA.center.lat);
+  const lng = Number(data.center?.longitude ?? data.center?.lng ?? DEFAULT_AREA.center.lng);
 
   return {
     name: data.name || DEFAULT_AREA.name,
     center: {
-      lat: Number(data.center?.lat || DEFAULT_AREA.center.lat),
-      lng: Number(data.center?.lng || DEFAULT_AREA.center.lng),
+      lat: Number.isFinite(lat) ? lat : DEFAULT_AREA.center.lat,
+      lng: Number.isFinite(lng) ? lng : DEFAULT_AREA.center.lng,
     },
     radius: Number(data.radius || DEFAULT_AREA.radius),
     enabled: data.enabled ?? true,
   };
 }
 
-// แปลง state ในฟอร์มให้เป็น payload ที่พร้อมบันทึกลง Firebase
-function createServiceAreaPayload(area) {
-  const lat = Number(area.center.lat);
-  const lng = Number(area.center.lng);
-  const radius = Number(area.radius);
-
-  if (!area.name || Number.isNaN(lat) || Number.isNaN(lng) || Number.isNaN(radius)) {
-    return { error: SERVICE_AREA_TEXT.validationError };
-  }
-
-  return {
-    payload: {
-      name: area.name,
-      center: { lat, lng },
-      radius,
-      enabled: Boolean(area.enabled),
-      updatedAt: Date.now(),
-    },
-  };
-}
-
-// แปลงค่าศูนย์กลางจาก state ให้เป็น number สำหรับส่งเข้า Google Map
-function getMapCenter(area) {
-  return {
-    lat: Number(area.center.lat),
-    lng: Number(area.center.lng),
-  };
-}
-
-// แสดงรัศมีจากเมตรเป็นกิโลเมตรเพื่อให้อ่านง่ายขึ้นในกล่องคำแนะนำ
-function formatRadiusKm(radius) {
-  return (Number(radius) / 1000).toFixed(1);
-}
-
-// field input พร้อม label มาตรฐานของฟอร์ม
-function FormField({ label, value, onChange, type = "text", compact = false }) {
-  return (
-    <div>
-      <label className="text-[13px] font-bold text-slate-600 mb-1.5 block">
-        {label}
-      </label>
-      <input
-        type={type}
-        className={compact ? COMPACT_INPUT_CLASS : INPUT_CLASS}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </div>
-  );
-}
-
-// กล่องคำแนะนำการใช้งานและสรุปรัศมีปัจจุบัน
-function UsageHint({ radius }) {
-  return (
-    <div className="bg-red-50 border border-red-100 rounded-xl p-4 mb-5 text-[12px] text-red-700 space-y-1.5 shadow-sm">
-      <p className="font-bold flex items-center gap-1.5">💡 คำแนะนำการใช้งาน:</p>
-      <p>• คลิกบนแผนที่เพื่อปักหมุดศูนย์กลางพื้นที่ให้บริการ</p>
-      <p>• พิกัด Latitude / Longitude จะเปลี่ยนตามตำแหน่งที่คลิก</p>
-      <p className="font-bold">• รัศมีปัจจุบัน: {formatRadiusKm(radius)} กม.</p>
-    </div>
-  );
-}
-
-// toggle เปิด/ปิดการเช็คพื้นที่บริการของระบบ
-function EnabledToggle({ checked, onChange }) {
-  return (
-    <label className="flex items-center gap-3 text-sm font-bold text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100 cursor-pointer">
-      <input
-        type="checkbox"
-        className="w-4 h-4 text-red-500 rounded border-slate-300 focus:ring-red-500"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      เปิดใช้งานเช็คพิกัดพื้นที่
-    </label>
-  );
-}
-
-// ฟอร์มตั้งค่าพื้นที่บริการ แยกจาก component หลักเพื่อให้อ่าน flow ง่ายขึ้น
-function ServiceAreaForm({ area, saving, onChange, onCenterChange, onSave, onReset }) {
-  return (
-    <form onSubmit={onSave} className="space-y-4">
-      <FormField label="ชื่อพื้นที่" value={area.name} onChange={(value) => onChange("name", value)} />
-
-      <div className="grid grid-cols-2 gap-3">
-        <FormField
-          label="Latitude"
-          value={area.center.lat}
-          onChange={(value) => onCenterChange("lat", value)}
-          compact
-        />
-        <FormField
-          label="Longitude"
-          value={area.center.lng}
-          onChange={(value) => onCenterChange("lng", value)}
-          compact
-        />
-      </div>
-
-      <FormField
-        label="รัศมีบริการ (เมตร)"
-        type="number"
-        value={area.radius}
-        onChange={(value) => onChange("radius", value)}
-      />
-
-      <EnabledToggle checked={area.enabled} onChange={(value) => onChange("enabled", value)} />
-
-      <button
-        type="submit"
-        disabled={saving}
-        className="w-full bg-red-500 hover:bg-red-600 text-white rounded-xl py-3 font-bold shadow-md shadow-red-500/20 transition-all disabled:opacity-60 mt-2"
-      >
-        {saving ? "กำลังบันทึก..." : "บันทึกตั้งค่า"}
-      </button>
-
-      <button
-        type="button"
-        onClick={onReset}
-        disabled={saving}
-        className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl py-2.5 font-bold transition-all disabled:opacity-60"
-      >
-        รีเซ็ตค่าเริ่มต้น
-      </button>
-    </form>
-  );
-}
-
-// panel ด้านซ้าย รวมคำอธิบาย คำแนะนำ และฟอร์มตั้งค่า
-function ServiceAreaSettingsPanel({ area, saving, onChange, onCenterChange, onSave, onReset }) {
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 h-fit">
-      <h2 className="text-lg font-bold text-slate-800">{SERVICE_AREA_TEXT.title}</h2>
-      <p className="text-sm font-medium text-slate-500 mb-5">{SERVICE_AREA_TEXT.subtitle}</p>
-
-      <UsageHint radius={area.radius} />
-      <ServiceAreaForm
-        area={area}
-        saving={saving}
-        onChange={onChange}
-        onCenterChange={onCenterChange}
-        onSave={onSave}
-        onReset={onReset}
-      />
-    </div>
-  );
-}
-
-// แผนที่ด้านขวา แสดง marker ศูนย์กลางและวงรัศมีพื้นที่บริการ
-function ServiceAreaMap({ area, isLoaded, onMapClick }) {
-  const currentCenter = getMapCenter(area);
-
-  return (
-    <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden h-[600px]">
-      {!isLoaded ? (
-        <div className="w-full h-full flex items-center justify-center text-slate-400 font-medium">
-          กำลังโหลดแผนที่...
-        </div>
-      ) : (
-        <GoogleMap
-          mapContainerClassName="w-full h-full"
-          center={currentCenter}
-          zoom={15}
-          onClick={onMapClick}
-          options={MAP_OPTIONS}
-        >
-          <Marker position={currentCenter} label={CENTER_MARKER_LABEL} />
-          {area.enabled && (
-            <Circle
-              center={currentCenter}
-              radius={Number(area.radius)}
-              options={SERVICE_CIRCLE_OPTIONS}
-            />
-          )}
-        </GoogleMap>
-      )}
-    </div>
-  );
-}
-
-// component หลัก: โหลด/บันทึกพื้นที่บริการ และส่ง state ให้ form กับ map
 export default function ServiceAreaManager() {
   const [area, setArea] = useState(DEFAULT_AREA);
+  const [mapCenter, setMapCenter] = useState(DEFAULT_AREA.center);
   const [saving, setSaving] = useState(false);
+  const mapRef = useRef(null);
+  const [mapInstance, setMapInstance] = useState(null);
+
+  const markerRef = useRef(null);
+  const circleRef = useRef(null);
 
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_KEY,
   });
 
+  // โหลดค่าการตั้งค่าพื้นที่บริการแบบ Real-time จาก Firestore doc("settings", "serviceArea")
   useEffect(() => {
-    const areaRef = ref(db, "service_area");
-    const unsubscribe = onValue(areaRef, (snapshot) => {
-      setArea(normalizeServiceArea(snapshot.val()));
+    const areaRef = doc(db, "settings", "serviceArea");
+    const unsubscribe = onSnapshot(areaRef, (snap) => {
+      const normalized = normalizeServiceArea(snap.exists() ? snap.data() : null);
+      setArea(normalized);
+      setMapCenter(normalized.center);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // อัปเดต field ระดับบน เช่น name, radius, enabled
   const handleChange = (field, value) => {
     setArea((prev) => ({ ...prev, [field]: value }));
   };
 
-  // อัปเดต field ภายใน center เช่น lat/lng โดยคงค่าเดิมของอีกแกนไว้
   const handleCenterChange = (field, value) => {
-    setArea((prev) => ({
-      ...prev,
-      center: { ...prev.center, [field]: value },
-    }));
+    setArea((prev) => {
+      const nextCenter = { ...prev.center, [field]: value };
+      const lat = Number(nextCenter.lat);
+      const lng = Number(nextCenter.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0) {
+        setMapCenter({ lat, lng });
+      }
+      return {
+        ...prev,
+        center: nextCenter,
+      };
+    });
   };
 
-  // คลิกบนแผนที่เพื่อเปลี่ยนศูนย์กลางพื้นที่บริการ
+  // คลิกบนแผนที่หรือลากหมุดเพื่อเปลี่ยนจุดศูนย์กลาง
   const handleMapClick = (event) => {
+    if (!event?.latLng) return;
+    const nextCenter = {
+      lat: Number(event.latLng.lat().toFixed(6)),
+      lng: Number(event.latLng.lng().toFixed(6)),
+    };
     setArea((prev) => ({
       ...prev,
-      center: { lat: event.latLng.lat(), lng: event.latLng.lng() },
+      center: nextCenter,
     }));
   };
 
-  // validate และบันทึกค่าพื้นที่บริการลง Firebase
+  // บันทึกลง Firestore
   const handleSave = async (event) => {
     event.preventDefault();
 
-    const { payload, error } = createServiceAreaPayload(area);
-    if (error) {
-      alert(error);
+    const lat = Number(area.center.lat);
+    const lng = Number(area.center.lng);
+    const radius = Number(area.radius);
+
+    if (!area.name.trim() || Number.isNaN(lat) || Number.isNaN(lng) || Number.isNaN(radius)) {
+      alert("กรุณากรอกข้อมูลให้ครบถ้วนและถูกต้อง");
       return;
     }
 
     setSaving(true);
     try {
-      await set(ref(db, "service_area"), payload);
-      alert(SERVICE_AREA_TEXT.saveSuccess);
+      const payload = {
+        name: area.name.trim(),
+        center: {
+          latitude: lat,
+          longitude: lng,
+        },
+        radius,
+        enabled: Boolean(area.enabled),
+        updatedAt: serverTimestamp(),
+      };
+
+      await setDoc(doc(db, "settings", "serviceArea"), payload);
+      alert("บันทึกการตั้งค่าพื้นที่ให้บริการเรียบร้อยแล้ว");
     } catch (err) {
       console.error(err);
-      alert(SERVICE_AREA_TEXT.saveError);
+      alert("บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
     } finally {
       setSaving(false);
     }
   };
 
-  // reset กลับค่า default และบันทึกลง Firebase ทันทีหลังยืนยัน
+  // รีเซ็ตค่ากลับเป็นค่าเริ่มต้น
   const handleReset = async () => {
-    const ok = window.confirm(SERVICE_AREA_TEXT.resetConfirm);
-    if (!ok) return;
+    if (!window.confirm("ต้องการรีเซ็ตพื้นที่ให้บริการกลับเป็นค่ามาตรฐาน (สถานพยาบาล มก.กพส. รัศมี 1,300 เมตร) ใช่หรือไม่?")) return;
 
     setSaving(true);
     try {
-      const defaultPayload = { ...DEFAULT_AREA, updatedAt: Date.now() };
+      const defaultPayload = {
+        name: DEFAULT_AREA.name,
+        center: {
+          latitude: DEFAULT_AREA.center.lat,
+          longitude: DEFAULT_AREA.center.lng,
+        },
+        radius: DEFAULT_AREA.radius,
+        enabled: DEFAULT_AREA.enabled,
+        updatedAt: serverTimestamp(),
+      };
       setArea(DEFAULT_AREA);
-      await set(ref(db, "service_area"), defaultPayload);
-      alert(SERVICE_AREA_TEXT.resetSuccess);
+      setMapCenter(DEFAULT_AREA.center);
+      if (mapRef.current) {
+        mapRef.current.panTo(DEFAULT_AREA.center);
+        mapRef.current.setZoom(15);
+      }
+      await setDoc(doc(db, "settings", "serviceArea"), defaultPayload);
+      alert("รีเซ็ตค่าเริ่มต้นเรียบร้อยแล้ว");
     } catch (err) {
       console.error(err);
-      alert(SERVICE_AREA_TEXT.saveError);
+      alert("รีเซ็ตค่าไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
   };
 
+  // จัดการ Marker และ Circle บนแผนที่
+  const currentCenter = useMemo(
+    () => ({
+      lat: Number(area.center.lat) || DEFAULT_AREA.center.lat,
+      lng: Number(area.center.lng) || DEFAULT_AREA.center.lng,
+    }),
+    [area.center.lat, area.center.lng]
+  );
+  const radiusNum = Number(area.radius) || DEFAULT_AREA.radius;
+  const isEnabled = Boolean(area.enabled);
+
+  useEffect(() => {
+    if (!mapInstance || !window.google?.maps) return;
+
+    const marker = new window.google.maps.Marker({
+      map: mapInstance,
+      position: currentCenter,
+      label: CENTER_MARKER_LABEL,
+      draggable: true,
+      title: "ลากเพื่อเปลี่ยนจุดศูนย์กลาง",
+    });
+
+    const dragListener = marker.addListener("dragend", (e) => {
+      if (!e.latLng) return;
+      const nextCenter = {
+        lat: Number(e.latLng.lat().toFixed(6)),
+        lng: Number(e.latLng.lng().toFixed(6)),
+      };
+      setArea((prev) => ({ ...prev, center: nextCenter }));
+    });
+
+    const circle = new window.google.maps.Circle({
+      ...SERVICE_CIRCLE_OPTIONS,
+      map: isEnabled ? mapInstance : null,
+      center: currentCenter,
+      radius: radiusNum,
+    });
+
+    markerRef.current = marker;
+    circleRef.current = circle;
+
+    return () => {
+      window.google?.maps?.event?.removeListener(dragListener);
+      marker.setMap(null);
+      circle.setMap(null);
+      markerRef.current = null;
+      circleRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapInstance]);
+
+  // อัปเดตตำแหน่ง Marker และ Circle แบบ Real-time ตามค่าใน state
+  useEffect(() => {
+    if (markerRef.current) {
+      markerRef.current.setPosition(currentCenter);
+    }
+    if (circleRef.current) {
+      circleRef.current.setCenter(currentCenter);
+      circleRef.current.setRadius(radiusNum);
+      circleRef.current.setMap(isEnabled ? mapInstance : null);
+    }
+  }, [mapInstance, currentCenter.lat, currentCenter.lng, radiusNum, isEnabled, currentCenter]);
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <ServiceAreaSettingsPanel
-        area={area}
-        saving={saving}
-        onChange={handleChange}
-        onCenterChange={handleCenterChange}
-        onSave={handleSave}
-        onReset={handleReset}
-      />
-      <ServiceAreaMap area={area} isLoaded={isLoaded} onMapClick={handleMapClick} />
+    <div className="p-4 h-full overflow-y-auto custom-scrollbar bg-slate-50 space-y-5">
+      {/* ส่วนหัวหน้า + สถานะปัจจุบัน */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            🌐 จัดการรัศมีและพื้นที่ให้บริการ (Service Area)
+          </h1>
+          <p className="text-xs font-medium text-slate-500 mt-1">
+            กำหนดขอบเขตรัศมีการให้บริการของศูนย์สั่งการรถพยาบาลฉุกเฉิน ม.เกษตรศาสตร์ วิทยาเขตกำแพงแสน
+          </p>
+        </div>
+
+        {/* ป้ายแสดงข้อมูลสรุปปัจจุบัน */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2">
+            <span className="text-[11px] font-bold text-slate-500 block">รัศมีบริการ</span>
+            <span className="text-lg font-bold text-red-600">
+              {radiusNum.toLocaleString()} ม. ({(radiusNum / 1000).toFixed(2)} กม.)
+            </span>
+          </div>
+
+          <div
+            className={`rounded-xl px-3.5 py-2 border ${
+              isEnabled
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : "bg-slate-100 border-slate-200 text-slate-600"
+            }`}
+          >
+            <span className="text-[11px] font-bold block">สถานะการตรวจสอบ</span>
+            <span className="text-sm font-bold flex items-center gap-1.5 mt-0.5">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isEnabled ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+                }`}
+              />
+              {isEnabled ? "เปิดใช้งานตรวจพื้นที่" : "ปิดการตรวจสอบพื้นที่"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* เนื้อหาหลัก: แบ่ง 2 คอลัมน์ (ซ้าย = แผงควบคุมตั้งค่า / ขวา = แผนที่ Real-time) */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+        {/* คอลัมน์ซ้าย (5 คอลัมน์): แผงควบคุมตั้งค่าพื้นที่ */}
+        <div className="xl:col-span-5 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
+          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+            ⚙️ ตั้งค่าขอบเขตพื้นที่ให้บริการ
+          </h2>
+
+          <form onSubmit={handleSave} className="space-y-4">
+            {/* สวิตช์เปิด/ปิดการตรวจสอบพื้นที่ */}
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-slate-800">
+                  ระบบตรวจสอบพื้นที่ให้บริการ
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  แจ้งเตือนผู้ใช้และเจ้าหน้าที่เมื่อมีการแจ้งเหตุนอกรัศมีบริการ
+                </p>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={area.enabled}
+                  onChange={(e) => handleChange("enabled", e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+              </label>
+            </div>
+
+            {/* ชื่อพื้นที่ */}
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">
+                ชื่อพื้นที่ให้บริการ
+              </label>
+              <input
+                type="text"
+                required
+                value={area.name}
+                onChange={(e) => handleChange("name", e.target.value)}
+                placeholder="เช่น มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+              />
+            </div>
+
+            {/* พิกัดจุดศูนย์กลาง */}
+            <div className="space-y-2 bg-slate-50/80 p-3 rounded-xl border border-slate-200/80">
+              <span className="text-xs font-bold text-slate-600 block">
+                📍 พิกัดจุดศูนย์กลาง (ศูนย์สั่งการ)
+              </span>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 block mb-0.5">
+                    Latitude
+                  </span>
+                  <input
+                    type="text"
+                    value={area.center.lat}
+                    onChange={(e) => handleCenterChange("lat", e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 block mb-0.5">
+                    Longitude
+                  </span>
+                  <input
+                    type="text"
+                    value={area.center.lng}
+                    onChange={(e) => handleCenterChange("lng", e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* รัศมีการให้บริการ (เมตร) พร้อม Slider + ปุ่มลัด */}
+            <div className="space-y-2.5 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-600">
+                  ⭕ รัศมีครอบคลุมการให้บริการ
+                </label>
+                <span className="text-sm font-extrabold text-red-600 font-mono">
+                  {radiusNum.toLocaleString()} ม. ({(radiusNum / 1000).toFixed(2)} กม.)
+                </span>
+              </div>
+
+              {/* Slider ปรับรัศมี */}
+              <input
+                type="range"
+                min="200"
+                max="5000"
+                step="50"
+                value={radiusNum}
+                onChange={(e) => handleChange("radius", Number(e.target.value))}
+                className="w-full accent-red-500 cursor-pointer h-2 bg-slate-200 rounded-lg"
+              />
+
+              {/* ปุ่มลัดเลือกรัศมีมาตรฐาน */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                {RADIUS_PRESETS.map((p) => {
+                  const active = radiusNum === p.value;
+                  return (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => handleChange("radius", p.value)}
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition ${
+                        active
+                          ? "bg-red-500 text-white border-red-500 shadow-xs"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ปุ่มบันทึก และ ปุ่มรีเซ็ต */}
+            <div className="space-y-2 pt-2">
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs sm:text-sm shadow-sm transition"
+              >
+                {saving ? "กำลังบันทึก..." : "💾 บันทึกการตั้งค่าพื้นที่บริการ"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={saving}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2 rounded-xl text-xs transition"
+              >
+                🔄 รีเซ็ตค่ามาตรฐาน
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* คอลัมน์ขวา (7 คอลัมน์): แผนที่ Real-time พร้อมวงรัศมี */}
+        <div className="xl:col-span-7 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-3">
+          <div>
+            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              🗺️ ขอบเขตวงรัศมีบนแผนที่
+            </h2>
+            <p className="text-xs text-slate-500">
+              คลิกบนแผนที่ หรือลากหมุดศูนย์สั่งการ เพื่อย้ายตำแหน่งศูนย์กลางแบบ Real-time
+            </p>
+          </div>
+
+          <div className="w-full h-[580px] rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
+            {!isLoaded ? (
+              <div className="w-full h-full flex items-center justify-center text-slate-400 font-medium">
+                กำลังโหลดแผนที่...
+              </div>
+            ) : (
+              <GoogleMap
+                mapContainerClassName="w-full h-full"
+                center={mapCenter}
+                zoom={15}
+                onLoad={(map) => {
+                  mapRef.current = map;
+                  setMapInstance(map);
+                }}
+                onUnmount={() => {
+                  mapRef.current = null;
+                  setMapInstance(null);
+                }}
+                onClick={handleMapClick}
+                options={MAP_OPTIONS}
+              />
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,23 +1,31 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getDatabase } from "firebase/database";
+import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyA4TVIeTuKIz3QSQyFwiEaQN_xU0UqTtMw", 
-  authDomain: "kps-ambulance.firebaseapp.com",
-  databaseURL: "https://kps-ambulance-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "kps-ambulance",
-  storageBucket: "kps-ambulance.firebasestorage.app",
-  messagingSenderId: "603735444136",
-  appId: "1:603735444136:web:9e1cfa833cdaf87401509d",
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyCy0B8aBsn7v8ZlrTfPOwUEPBVrv8ChNhc",
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "kps-ambulance-5308f.firebaseapp.com",
+  databaseURL: process.env.REACT_APP_FIREBASE_DB_URL || "https://kps-ambulance-5308f-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "kps-ambulance-5308f",
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "kps-ambulance-5308f.firebasestorage.app",
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "911722332967",
+  appId: process.env.REACT_APP_FIREBASE_APP_ID || "1:911722332967:web:ef0c31b83f541a4e605f02",
 };
 
 const app = !getApps().length
   ? initializeApp(firebaseConfig)
   : getApp();
 
-const db = getDatabase(app);
+const db = getFirestore(app);
 const auth = getAuth(app);
+const storage = getStorage(app);
 
-export { db, auth };
+let registeringStaff = false;
+export const setRegisteringStaff = (value) => {
+  registeringStaff = Boolean(value);
+};
+export const isRegisteringStaff = () => registeringStaff;
+
+export { db, auth, storage };
 export default app;

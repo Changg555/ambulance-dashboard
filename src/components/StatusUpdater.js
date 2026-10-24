@@ -1,66 +1,72 @@
 import React, { useState } from 'react';
-import { ref, update } from 'firebase/database';
+import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { MOBILE_STATUS_LABEL, toMillis } from '../hooks/useIncidents';
 
-// กำหนดสถานะตามลำดับ พร้อมสีและข้อความที่ใช้แสดงในรายการ
+// กำหนดสถานะตามลำดับ อิงตามฝั่ง Mobile (STATUS_FLOW)
 const STATUS_ITEMS = [
   {
     key: 'pending',
-    label: 'รอรับเรื่อง',
+    label: 'รอเจ้าหน้าที่รับเรื่อง',
     icon: '📋',
     colorClassName: 'bg-red-50 text-red-700 border-red-200',
     activeClassName: 'bg-red-600 text-white border-red-600',
   },
   {
     key: 'accepted',
-    label: 'รับเรื่องแล้ว',
+    label: 'เจ้าหน้าที่รับเรื่องแล้ว',
     icon: '✅',
     colorClassName: 'bg-orange-50 text-orange-700 border-orange-200',
     activeClassName: 'bg-orange-500 text-white border-orange-500',
   },
   {
-    key: 'en_route',
-    label: 'กำลังเดินทาง',
+    key: 'on_the_way',
+    label: 'กำลังเดินทางไปหาคุณ',
     icon: '🚑',
     colorClassName: 'bg-blue-50 text-blue-700 border-blue-200',
     activeClassName: 'bg-blue-600 text-white border-blue-600',
   },
   {
     key: 'arrived',
-    label: 'ถึงที่เกิดเหตุ',
+    label: 'ถึงจุดเกิดเหตุแล้ว',
     icon: '📍',
     colorClassName: 'bg-purple-50 text-purple-700 border-purple-200',
     activeClassName: 'bg-purple-600 text-white border-purple-600',
   },
   {
     key: 'completed',
-    label: 'เสร็จสิ้น',
+    label: 'ช่วยเหลือเสร็จสิ้น',
     icon: '🏁',
     colorClassName: 'bg-green-50 text-green-700 border-green-200',
     activeClassName: 'bg-green-600 text-white border-green-600',
   },
 ];
 
-// แปลงรหัสประเภทเหตุให้เป็นข้อความสำหรับส่วนหัว
+// แปลงรหัสประเภทเหตุให้เป็นข้อความสำหรับส่วนหัว อิงจากฝั่ง Mobile
 const TYPE_LABELS = {
-  vehicle_accident: '🚗 อุบัติเหตุรถ',
-  motorcycle: '🏍️ รถจักรยานยนต์',
-  cardiac: '💛 หัวใจ/หมดสติ',
-  injury: '🤕 บาดเจ็บ',
+  sos: '🚨 แจ้งเหตุด่วน (SOS)',
+  car_accident: '🚗 อุบัติเหตุรถ',
+  cardiac: '❤️ หัวใจ/หมดสติ',
+  injury: '🩹 บาดเจ็บ',
   fire: '🔥 ไฟไหม้',
-  other: '⚠️ เหตุอื่นๆ',
+  drowning: '🌊 จมน้ำ',
+  other: '⚠️ เหตุอื่น ๆ',
 };
 
-// รวมรูปแบบข้อมูลรูปจาก schema ปัจจุบันและ schema เดิมให้เป็น array เดียว
+// รวมรูปแบบข้อมูลรูปจากฝั่ง Mobile ({ url, publicId }) และ schema เดิมให้เป็น array เดียว
 function getIncidentImages(incident) {
-  return incident?.images || (incident?.image ? [incident.image] : []);
+  const raw = incident?.images || (incident?.image ? [incident.image] : []);
+  return raw
+    .map((item) => (typeof item === 'string' ? item : item?.url))
+    .filter(Boolean);
 }
 
 // คืนเวลาแจ้งเหตุในรูปแบบภาษาไทยสำหรับแสดงบนส่วนหัว
 function formatIncidentTime(createdAt) {
-  if (!createdAt) return '-';
+  const ms = toMillis(createdAt);
+  if (!ms) return '-';
 
-  return new Date(createdAt).toLocaleString('th-TH', {
+  return new Date(ms).toLocaleString('th-TH', {
     day: '2-digit',
     month: 'short',
     hour: '2-digit',
@@ -68,9 +74,9 @@ function formatIncidentTime(createdAt) {
   });
 }
 
-// คืนข้อความแสดงเลขเคส โดยใช้ท้าย ID เป็นค่าทดแทนเมื่อไม่มี caseNumber
+// คืนข้อความแสดงเลขเคส อิงรูปแบบฝั่ง Mobile KPS-XXXXXXXX
 function getCaseNumber(incident) {
-  return incident.caseNumber || incident.id?.slice(-8).toUpperCase() || '-';
+  return incident.caseNumber || (incident.id ? `KPS-${incident.id.slice(0, 8).toUpperCase()}` : '-');
 }
 
 // แสดงภาพขนาดใหญ่ พร้อมซูม ลากภาพ และปิดหน้าต่างตัวอย่าง
@@ -83,7 +89,6 @@ function ImagePreviewModal({ imageUrl, onClose }) {
 
   if (!imageUrl) return null;
 
-  // เลือกจุดซูมจากตำแหน่งที่คลิก และวนระดับซูมก่อนกลับสู่ขนาดปกติ
   const handleImageClick = (event) => {
     if (dragging) return;
 
@@ -103,7 +108,6 @@ function ImagePreviewModal({ imageUrl, onClose }) {
     });
   };
 
-  // เริ่มลากภาพเมื่ออยู่ในระดับซูม
   const handleMouseDown = (event) => {
     if (zoom <= 1) return;
 
@@ -115,7 +119,6 @@ function ImagePreviewModal({ imageUrl, onClose }) {
     });
   };
 
-  // ปรับตำแหน่งภาพตามการลากของเมาส์
   const handleMouseMove = (event) => {
     if (!dragging) return;
 
@@ -125,7 +128,6 @@ function ImagePreviewModal({ imageUrl, onClose }) {
     });
   };
 
-  // คืนภาพสู่ขนาดและตำแหน่งเริ่มต้น
   const resetImage = () => {
     setZoom(1);
     setOrigin('center center');
@@ -196,7 +198,7 @@ function IncidentHeader({ incident, onClose }) {
       <div>
         <p className="text-white font-semibold text-base">{typeLabel}</p>
         <p className="text-red-200 text-sm mt-0.5">
-          #{getCaseNumber(incident)} · {formatIncidentTime(incident.createdAt)}
+          {getCaseNumber(incident)} · {formatIncidentTime(incident.createdAt)}
         </p>
       </div>
 
@@ -214,20 +216,22 @@ function IncidentHeader({ incident, onClose }) {
   );
 }
 
-// แสดงที่อยู่และพิกัดของเหตุ โดยรองรับพิกัดละติจูดหรือ longitude ที่มีค่าเป็นศูนย์
-function IncidentLocation({ location }) {
-  const hasCoordinates =
-    Number.isFinite(location?.lat) && Number.isFinite(location?.lng);
+// แสดงที่อยู่และพิกัดของเหตุ รองรับทั้ง latitude/longitude (Mobile) และ lat/lng
+function IncidentLocation({ incident }) {
+  const address = incident.address || incident.location?.address || 'ไม่ทราบตำแหน่ง';
+  const lat = Number(incident.location?.latitude ?? incident.location?.lat);
+  const lng = Number(incident.location?.longitude ?? incident.location?.lng);
+  const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
 
   return (
     <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
       <p className="text-xs text-gray-400 mb-0.5">ตำแหน่งเกิดเหตุ</p>
       <p className="text-sm font-medium text-gray-700">
-        📍 {location?.address || 'ไม่ทราบตำแหน่ง'}
+        📍 {address}
       </p>
       {hasCoordinates && (
         <p className="text-xs text-gray-400 font-mono mt-0.5">
-          {location.lat.toFixed(5)}, {location.lng.toFixed(5)}
+          {lat.toFixed(5)}, {lng.toFixed(5)}
         </p>
       )}
     </div>
@@ -286,14 +290,15 @@ function getStatusClassName(status, isCurrent, isPast) {
 
 // แสดงสถานะทั้งหมด พร้อมบอกว่าสถานะใดกำลังทำงานหรือผ่านไปแล้ว
 function StatusList({ currentStatus, updating, onUpdate }) {
+  const normalizedCurrent = currentStatus === 'en_route' ? 'on_the_way' : currentStatus;
   const currentIndex = STATUS_ITEMS.findIndex(
-    (status) => status.key === currentStatus,
+    (status) => status.key === normalizedCurrent,
   );
 
   return (
     <div className="flex flex-col gap-2">
       {STATUS_ITEMS.map((status, index) => {
-        const isCurrent = status.key === currentStatus;
+        const isCurrent = status.key === normalizedCurrent;
         const isPast = currentIndex >= 0 && index < currentIndex;
 
         return (
@@ -381,7 +386,7 @@ function StatusUpdateSection({
   );
 }
 
-// จัดการ state และบันทึกสถานะใหม่ของเหตุการณ์ลง Firebase
+// จัดการ state และบันทึกสถานะใหม่ของเหตุการณ์ลง Firestore พร้อมเพิ่ม timeline subcollection
 export default function StatusUpdater({ incident, onClose }) {
   const [updating, setUpdating] = useState(false);
   const [note, setNote] = useState('');
@@ -392,19 +397,35 @@ export default function StatusUpdater({ incident, onClose }) {
 
   const images = getIncidentImages(incident);
 
-  // บันทึกสถานะ หมายเหตุ และเวลาที่อัปเดต แล้วแสดงผลตามผลการบันทึก
   const handleUpdate = async (newStatus) => {
-    if (newStatus === incident.status || updating) return;
+    const firestoreStatus = newStatus === 'en_route' ? 'on_the_way' : newStatus;
+    if (firestoreStatus === incident.status || updating) return;
 
     setUpdating(true);
     setSuccess(false);
 
     try {
-      await update(ref(db, `incidents/${incident.id}`), {
-        status: newStatus,
+      const batch = writeBatch(db);
+      const incRef = doc(db, 'incidents', incident.id);
+      const tlRef = doc(collection(db, 'incidents', incident.id, 'timeline'));
+
+      const payload = {
+        status: firestoreStatus,
         note: note.trim() || null,
-        updatedAt: Date.now(),
+        updatedAt: serverTimestamp(),
+      };
+      if (firestoreStatus === 'completed') {
+        payload.completedAt = serverTimestamp();
+      }
+
+      batch.update(incRef, payload);
+      batch.set(tlRef, {
+        status: firestoreStatus,
+        note: note.trim() || MOBILE_STATUS_LABEL[firestoreStatus] || firestoreStatus,
+        at: serverTimestamp(),
       });
+
+      await batch.commit();
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
     } catch (error) {
@@ -418,7 +439,7 @@ export default function StatusUpdater({ incident, onClose }) {
     <>
       <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
         <IncidentHeader incident={incident} onClose={onClose} />
-        <IncidentLocation location={incident.location} />
+        <IncidentLocation incident={incident} />
         <IncidentDescription description={incident.description} />
         <IncidentImages images={images} onPreview={setPreviewImage} />
         <StatusUpdateSection

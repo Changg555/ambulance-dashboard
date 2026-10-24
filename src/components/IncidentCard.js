@@ -1,34 +1,46 @@
 import React, { useState } from "react";
+import { toMillis } from "../hooks/useIncidents";
+import ReporterDetailModal from "./ReporterDetailModal";
 
-// ป้ายกำกับประเภทเหตุฉุกเฉินที่ใช้แสดงบน card
+// ป้ายกำกับประเภทเหตุฉุกเฉิน อิงจากฝั่ง Mobile (src/constants/incident.js)
 const TYPE_LABELS = {
-  vehicle_accident: "🚗 อุบัติเหตุรถ",
-  cardiac: "💛 หัวใจ/หมดสติ",
-  injury: "🩹 บาดเจ็บ/ล้มหกล้ม",
+  sos: "🚨 แจ้งเหตุด่วน (SOS)",
+  car_accident: "🚗 อุบัติเหตุรถ",
+  cardiac: "❤️ หัวใจ/หมดสติ",
+  injury: "🩹 บาดเจ็บ",
   fire: "🔥 ไฟไหม้",
-  other: "⚠️ อื่น ๆ",
+  drowning: "🌊 จมน้ำ",
+  other: "⚠️ เหตุอื่น ๆ",
 };
 
-// ป้ายกำกับสถานะของเคสหลัง normalize แล้ว
+// ระดับความรุนแรง อิงจากฝั่ง Mobile (src/constants/incident.js)
+const SEVERITY_CONFIG = {
+  low: { label: "ไม่รุนแรง", className: "bg-emerald-100 text-emerald-700" },
+  medium: { label: "ปานกลาง", className: "bg-amber-100 text-amber-700" },
+  high: { label: "รุนแรง", className: "bg-orange-100 text-orange-700" },
+  critical: { label: "วิกฤต", className: "bg-red-100 text-red-700" },
+};
+
+// ป้ายกำกับสถานะของเคส อิงตามฝั่ง Mobile
 const STATUS_LABELS = {
-  pending: "รอดำเนินการ",
-  accepted: "รับเคสแล้ว",
-  en_route: "กำลังเดินทาง",
-  arrived: "ถึงจุดเกิดเหตุ",
-  completed: "เสร็จสิ้น",
-  cancelled: "ยกเลิกเคส",
+  pending: "รอเจ้าหน้าที่รับเรื่อง",
+  accepted: "เจ้าหน้าที่รับเรื่องแล้ว",
+  on_the_way: "กำลังเดินทางไปหาคุณ",
+  arrived: "ถึงจุดเกิดเหตุแล้ว",
+  completed: "ช่วยเหลือเสร็จสิ้น",
+  cancelled: "ยกเลิกแล้ว",
 };
 
-// ลำดับปุ่มเปลี่ยนสถานะที่เจ้าหน้าที่สามารถกดได้
+// ลำดับปุ่มเปลี่ยนสถานะที่เจ้าหน้าที่สามารถกดได้ (ใช้ค่าตรงกับ Mobile STATUS_FLOW)
 const STATUS_OPTIONS = [
   { value: "accepted", label: "รับเคส" },
-  { value: "en_route", label: "กำลังเดินทาง" },
+  { value: "on_the_way", label: "กำลังเดินทาง" },
   { value: "arrived", label: "ถึงจุดเกิดเหตุ" },
   { value: "completed", label: "เสร็จสิ้น" },
 ];
 
-// flow สถานะที่บังคับให้เปลี่ยนทีละขั้นเพื่อกันการข้ามขั้นตอน
-const STATUS_FLOW = ["pending", "accepted", "en_route", "arrived", "completed"];
+// flow สถานะที่บังคับให้เปลี่ยนทีละขั้นเพื่อกันการข้ามขั้นตอน (ตรงกับ Mobile STATUS_FLOW)
+const STATUS_FLOW = ["pending", "accepted", "on_the_way", "arrived", "completed"];
 
 // ข้อความยืนยัน action ที่มีผลต่อข้อมูลจริง
 const CONFIRM_MESSAGES = {
@@ -36,39 +48,42 @@ const CONFIRM_MESSAGES = {
   delete: "ต้องการลบเคสนี้ถาวรใช่หรือไม่? ข้อมูลจะหายจาก Firebase ทันที",
 };
 
-// แปลงชื่อสถานะเก่าให้ตรงกับชื่อสถานะที่หน้า UI ใช้ร่วมกัน
-function normalizeStatus(status) {
-  if (status === "on_the_way") return "en_route";
-  return status || "pending";
-}
-
 // แสดงวันที่/เวลาแบบไทย และกันค่าว่างไม่ให้แสดง Invalid Date
 function formatTime(time) {
-  if (!time) return "-";
-  return new Date(time).toLocaleString("th-TH");
+  const ms = toMillis(time);
+  if (!ms) return "-";
+  return new Date(ms).toLocaleString("th-TH");
 }
 
 // เช็คว่าสถานะถัดไปเป็นขั้นถัดไปจริงหรือไม่
 function canGoToStatus(currentStatus, nextStatus) {
-  const currentIndex = STATUS_FLOW.indexOf(normalizeStatus(currentStatus));
-  const nextIndex = STATUS_FLOW.indexOf(normalizeStatus(nextStatus));
+  const currentIndex = STATUS_FLOW.indexOf(currentStatus || "pending");
+  const nextIndex = STATUS_FLOW.indexOf(nextStatus);
 
   return nextIndex === currentIndex + 1;
 }
 
-// รวมรูปจาก schema เก่าและใหม่ให้เป็น array เดียว
+// รวมรูปจากฝั่ง Mobile ({ url, publicId }) และ schema เดิมให้เป็น array ของ URL
 function getIncidentImages(incident) {
-  return incident?.images || (incident?.image ? [incident.image] : []);
+  const raw = incident?.images || (incident?.image ? [incident.image] : []);
+  return raw
+    .map((item) => (typeof item === "string" ? item : item?.url))
+    .filter(Boolean);
 }
 
 // เช็คว่ามีพิกัดครบพอสำหรับแสดงตัวเลข lat/lng หรือไม่
-function hasCoordinates(location) {
-  return Boolean(location?.lat && location?.lng);
+function getCoords(location) {
+  const lat = Number(location?.latitude ?? location?.lat);
+  const lng = Number(location?.longitude ?? location?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+    return null;
+  }
+  return { lat, lng };
 }
 
 // จำกัด timeline ให้แสดงเฉพาะรายการท้าย ๆ เพื่อไม่ให้ card ยาวเกินไป
 function getLatestTimelineItems(timeline) {
-  return (timeline || []).slice(-4);
+  return (timeline || []).slice(-5);
 }
 
 // รวม class ของ card ตามสถานะ selected เพื่อให้อ่าน layout หลักง่ายขึ้น
@@ -114,7 +129,7 @@ function ServiceAreaBadge({ incident }) {
 
 // ส่วนหัวของ card: ประเภทเหตุ เลขเคส เวลาแจ้งเหตุ และสถานะปัจจุบัน
 function IncidentHeader({ incident, currentStatus }) {
-  const caseNumber = incident.caseNumber || incident.id?.slice(0, 8);
+  const caseNumber = incident.caseNumber || `KPS-${incident.id?.slice(0, 8).toUpperCase()}`;
 
   return (
     <div className="flex items-start justify-between gap-2">
@@ -144,13 +159,25 @@ function IncidentHeader({ incident, currentStatus }) {
   );
 }
 
-// badge ข้อมูลเสริม เช่น พื้นที่บริการและระยะห่างจากศูนย์
+// badge ข้อมูลเสริม เช่น ความรุนแรง โหมดการแจ้งเหตุ พื้นที่บริการ และระยะห่างจากศูนย์
 function IncidentMetaBadges({ incident }) {
+  const severityInfo = SEVERITY_CONFIG[incident.severity];
+
   return (
     <div className="flex gap-2 flex-wrap mt-3.5">
+      {severityInfo && (
+        <Badge className={severityInfo.className}>
+          ความรุนแรง: {severityInfo.label}
+        </Badge>
+      )}
+
+      {incident.mode === "quick" && (
+        <Badge className="bg-red-600 text-white">SOS ด่วน</Badge>
+      )}
+
       <ServiceAreaBadge incident={incident} />
 
-      {incident.distanceFromServiceCenter && (
+      {incident.distanceFromServiceCenter != null && (
         <Badge className="bg-slate-100 text-slate-600">
           ห่างศูนย์ {incident.distanceFromServiceCenter} ม.
         </Badge>
@@ -159,27 +186,87 @@ function IncidentMetaBadges({ incident }) {
   );
 }
 
-// รายละเอียดเหตุการณ์ที่ผู้แจ้งกรอกเข้ามา
-function IncidentDescription({ description }) {
+// ข้อมูลผู้แจ้งเหตุและเจ้าหน้าที่ผู้รับผิดชอบ (จากฝั่ง Mobile reporter & assignedTo)
+function IncidentReporterInfo({ reporter, assignedTo, hasReporterUid, onViewReporter }) {
+  if (!reporter && !assignedTo && !hasReporterUid) return null;
+
   return (
-    <p className="text-sm font-medium text-slate-700 mt-4 bg-slate-50/80 p-3 rounded-xl border border-slate-100">
+    <div className="mt-3 space-y-1.5 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
+      {(reporter || hasReporterUid) && (
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-slate-600 font-medium">
+              👤 ผู้แจ้ง:{" "}
+              <strong className="text-slate-800">{reporter?.name || "-"}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewReporter();
+              }}
+              className="text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-lg shadow-sm transition flex items-center gap-1"
+            >
+              <span>🪪</span> ดูข้อมูลผู้แจ้ง
+            </button>
+          </div>
+          {reporter?.phone && (
+            <a
+              href={`tel:${reporter.phone}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-emerald-600 font-bold hover:underline flex items-center gap-1"
+            >
+              📞 {reporter.phone}
+            </a>
+          )}
+        </div>
+      )}
+
+      {assignedTo && (
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
+          <span className="text-slate-600 font-medium">
+            🚑 ผู้รับผิดชอบ:{" "}
+            <strong className="text-slate-800">
+              {assignedTo.name || "-"}
+              {assignedTo.vehicle ? ` (${assignedTo.vehicle})` : ""}
+            </strong>
+          </span>
+          {assignedTo.phone && (
+            <span className="text-slate-500 font-mono">{assignedTo.phone}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// รายละเอียดเหตุการณ์ที่ผู้แจ้งกรอกเข้ามา
+function IncidentDescription({ description, mode }) {
+  if (mode === "quick" && !description) return null;
+
+  return (
+    <p className="text-sm font-medium text-slate-700 mt-3 bg-slate-50/80 p-3 rounded-xl border border-slate-100">
       {description || "ไม่มีรายละเอียดแจ้งไว้"}
     </p>
   );
 }
 
 // ตำแหน่งเหตุการณ์และพิกัด lat/lng ถ้ามีข้อมูลครบ
-function IncidentLocation({ location }) {
+function IncidentLocation({ incident }) {
+  const address = incident.address || incident.location?.address || "ไม่ทราบตำแหน่ง";
+  const coords = getCoords(incident.location);
+
   return (
     <div className="mt-3">
       <p className="text-[13px] font-medium text-slate-500 flex items-start gap-1.5">
         <span className="text-red-500">📍</span>
-        <span className="leading-snug">{location?.address || "ไม่ทราบตำแหน่ง"}</span>
+        <span className="leading-snug">{address}</span>
       </p>
 
-      {hasCoordinates(location) && (
+      {coords && (
         <p className="text-[11px] font-mono text-slate-400 mt-1.5 ml-5">
-          {Number(location.lat).toFixed(6)}, {Number(location.lng).toFixed(6)}
+          {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+          {incident.location?.source ? ` (${incident.location.source})` : ""}
         </p>
       )}
     </div>
@@ -220,7 +307,7 @@ function IncidentImages({ incident, onPreview }) {
   );
 }
 
-// timeline การเปลี่ยนสถานะของเหตุการณ์ แสดงเฉพาะ 4 รายการล่าสุด
+// timeline การเปลี่ยนสถานะของเหตุการณ์
 function IncidentTimeline({ timeline }) {
   const timelineItems = getLatestTimelineItems(timeline);
 
@@ -232,11 +319,12 @@ function IncidentTimeline({ timeline }) {
 
       <div className="space-y-0">
         {timelineItems.map((item, index) => {
-          const timelineStatus = normalizeStatus(item?.status);
+          const timelineStatus = item?.status || "pending";
           const isLast = index === timelineItems.length - 1;
+          const timeVal = item?.time ?? item?.at;
 
           return (
-            <div key={`${timelineStatus}-${item?.time || index}`} className="flex gap-3">
+            <div key={item?.id || `${timelineStatus}-${index}`} className="flex gap-3">
               <div className="flex flex-col items-center">
                 <div
                   className={`w-2.5 h-2.5 rounded-full mt-1 ${
@@ -252,11 +340,11 @@ function IncidentTimeline({ timeline }) {
                     isLast ? "font-bold text-slate-800" : "font-semibold text-slate-500"
                   }`}
                 >
-                  {STATUS_LABELS[timelineStatus] || item?.label || "-"}
+                  {item?.note || item?.label || STATUS_LABELS[timelineStatus] || "-"}
                 </span>
 
                 <span className="text-[11px] font-medium text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100 whitespace-nowrap w-fit">
-                  {formatTime(item?.time)}
+                  {formatTime(timeVal)}
                 </span>
               </div>
             </div>
@@ -273,66 +361,47 @@ function IncidentTimeline({ timeline }) {
   );
 }
 
-// ปุ่มเปลี่ยนสถานะตาม flow ที่กำหนดไว้ใน STATUS_FLOW
+// ปุ่มเปลี่ยนสถานะทีละขั้นแบบปุ่มเดียวตามสถานะปัจจุบัน (แทนการแสดง 4 ปุ่มพร้อมกัน)
 function StatusActionGrid({ currentStatus, incidentId, onUpdateStatus }) {
-  return (
-    <div className="grid grid-cols-2 gap-2 mt-2 pt-4 border-t border-slate-100">
-      {STATUS_OPTIONS.map((option) => {
-        const isAllowed = canGoToStatus(currentStatus, option.value);
+  const nextOption = STATUS_OPTIONS.find((option) =>
+    canGoToStatus(currentStatus, option.value)
+  );
 
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!isAllowed) return;
-              onUpdateStatus(incidentId, option.value);
-            }}
-            disabled={!isAllowed}
-            className={`text-xs font-bold rounded-xl px-2 py-3 transition-all ${
-              isAllowed
-                ? "bg-red-50 text-red-600 hover:bg-red-500 hover:text-white shadow-sm"
-                : "bg-slate-50 text-slate-400 border border-slate-100 cursor-not-allowed"
-            }`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
+  if (!nextOption) return null;
+
+  return (
+    <div className="mt-2 pt-4 border-t border-slate-100">
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onUpdateStatus(incidentId, nextOption.value);
+        }}
+        className="w-full text-xs font-bold rounded-xl px-3 py-3 transition-all bg-red-500 text-white hover:bg-red-600 shadow-sm"
+      >
+        {nextOption.label}
+      </button>
     </div>
   );
 }
 
-// ปุ่มยกเลิกเคสและลบถาวร โดยแยก confirm ไว้ให้ component หลักไม่รก
-function DangerActions({ incidentId, canCancel, role, onCancel, onDelete }) {
+// ปุ่มยกเลิกเคส โดยแยก confirm ไว้ให้ component หลักไม่รก
+function DangerActions({ incidentId, canCancel, onCancel }) {
   const confirmAndRun = (event, message, action) => {
     event.stopPropagation();
     if (window.confirm(message)) action(incidentId);
   };
 
-  return (
-    <>
-      {canCancel && (
-        <button
-          type="button"
-          onClick={(event) => confirmAndRun(event, CONFIRM_MESSAGES.cancel, onCancel)}
-          className="w-full mt-3 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl px-3 py-3 transition-all"
-        >
-          ยกเลิกเคส
-        </button>
-      )}
+  if (!canCancel) return null;
 
-      {role === "admin" && (
-        <button
-          type="button"
-          onClick={(event) => confirmAndRun(event, CONFIRM_MESSAGES.delete, onDelete)}
-          className="w-full mt-2 text-[11px] font-bold text-red-500 hover:text-red-700 underline underline-offset-2 py-2"
-        >
-          ลบเคสนี้ถาวร (Admin เท่านั้น)
-        </button>
-      )}
-    </>
+  return (
+    <button
+      type="button"
+      onClick={(event) => confirmAndRun(event, CONFIRM_MESSAGES.cancel, onCancel)}
+      className="w-full mt-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl px-3 py-3 transition-all"
+    >
+      ยกเลิกเคส
+    </button>
   );
 }
 
@@ -481,22 +550,30 @@ export default function IncidentCard({
   role,
 }) {
   const [previewImage, setPreviewImage] = useState(null);
+  const [showReporterModal, setShowReporterModal] = useState(false);
 
   if (!incident) return null;
 
-  const currentStatus = normalizeStatus(incident.status);
+  const currentStatus = incident.status || "pending";
   const isCompleted = currentStatus === "completed";
   const isCancelled = currentStatus === "cancelled";
   const canCancel = !isCompleted && !isCancelled;
   const canUpdateStatus = !isCompleted && !isCancelled;
+  const reporterUid = incident.reporter?.uid || incident.userId || null;
 
   return (
     <>
       <div onClick={onClick} className={getCardClassName(isSelected)}>
         <IncidentHeader incident={incident} currentStatus={currentStatus} />
         <IncidentMetaBadges incident={incident} />
-        <IncidentDescription description={incident.description} />
-        <IncidentLocation location={incident.location} />
+        <IncidentReporterInfo
+          reporter={incident.reporter}
+          assignedTo={incident.assignedTo}
+          hasReporterUid={Boolean(reporterUid)}
+          onViewReporter={() => setShowReporterModal(true)}
+        />
+        <IncidentDescription description={incident.description} mode={incident.mode} />
+        <IncidentLocation incident={incident} />
         <IncidentImages incident={incident} onPreview={setPreviewImage} />
         <IncidentTimeline timeline={incident.timeline} />
 
@@ -518,6 +595,15 @@ export default function IncidentCard({
       </div>
 
       <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />
+
+      <ReporterDetailModal
+        isOpen={showReporterModal}
+        onClose={() => setShowReporterModal(false)}
+        reporterUid={reporterUid}
+        fallbackReporter={incident.reporter}
+        incidentId={incident.id}
+        role={role}
+      />
     </>
   );
 }

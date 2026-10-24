@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // 1. Helper Functions ตรวจสอบตัวตนและสิทธิ์การใช้งาน
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function currentUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasUserProfile() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // ตรวจสอบว่าบัญชีมีสถานะ active == true ใน Firestore
+    function isActive() {
+      return hasUserProfile() && currentUserDoc().data.active == true;
+    }
+
+    // ตรวจสอบว่า role เป็น 'staff' หรือ 'admin' ใน Firestore
+    function isStaffOrAdmin() {
+      return hasUserProfile() && currentUserDoc().data.role in ['staff', 'admin'];
+    }
+
+    // ตรวจสอบว่าเป็นเจ้าหน้าที่ (staff ที่ได้รับอนุมัติ active == true หรือเป็น admin)
+    function isAuthorizedStaff() {
+      return isAdmin() || (isStaffOrAdmin() && isActive());
+    }
+
+    // ตรวจสอบว่าเป็น Admin (role == 'admin' และไม่ได้ถูกระงับสิทธิ์ active != false)
+    function isAdmin() {
+      return hasUserProfile()
+        && currentUserDoc().data.role == 'admin'
+        && (!('active' in currentUserDoc().data) || currentUserDoc().data.active != false);
+    }
+
+    // =========================================================================
+    // 2. Collection: 'otp_verifications' และ 'otp_requests'
+    // =========================================================================
+    // ไม่อนุญาตให้อ่านหรือเขียน otp_verifications โดยตรงจาก Client-side (เข้าถึงผ่าน Admin SDK ฝั่ง Backend เท่านั้น)
+    match /otp_verifications/{email} {
+      allow read, write: if false;
+    }
+
+    // คิวคำขอส่ง/ตรวจสอบ OTP ระหว่างแอป/เว็บ กับ Backend
+    // ป้องกันการ Query รายชื่อทั้งหมด (allow list: if false) เพื่อไม่ให้อีเมลรั่วไหล
+    match /otp_requests/{requestId} {
+      allow create, get, delete: if true;
+      allow list, update: if false;
+    }
+
+    // =========================================================================
+    // 3. Collection: 'users', 'users_private', และ 'idcard_audit'
+    // =========================================================================
+    match /users/{uid} {
+      // อ่านข้อมูล: เจ้าของบัญชีอ่านข้อมูลตัวเองได้ หรือเจ้าหน้าที่ที่ได้รับอนุมัติ (Staff/Admin) อ่านข้อมูลได้
+      allow read: if isOwner(uid) || isAuthorizedStaff();
+
+      // สร้างโปรไฟล์ใหม่ตอนสมัครสมาชิก:
+      // เจ้าของบัญชีสร้างข้อมูลตัวเองได้ แต่ห้ามตั้ง role == 'admin' หรือตั้ง active == true เอง
+      allow create: if isOwner(uid)
+        && (!('role' in request.resource.data) || request.resource.data.role in ['user', 'staff'])
+        && (!('active' in request.resource.data) || request.resource.data.active == false);
+
+      // แก้ไขข้อมูล:
+      // - Admin อัปเดตข้อมูลของทุกคนได้ (รวมถึงการเปลี่ยนฟิลด์ role, active, status)
+      // - เจ้าของบัญชีแก้ไขข้อมูลตัวเองได้ แต่ห้ามแก้ไขฟิลด์ role, active, status เองเด็ดขาด
+      allow update: if isAdmin() || (
+        isOwner(uid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'active', 'status'])
+      );
+
+      // ลบข้อมูล: เฉพาะ Admin หรือเจ้าของบัญชี
+      allow delete: if isAdmin() || isOwner(uid);
+    }
+
+    // ข้อมูลเลขบัตรประชาชนที่เข้ารหัสแล้ว (อ่านเพื่อถอดรหัสได้เฉพาะ Admin หรือเจ้าของบัญชี)
+    match /users_private/{uid} {
+      allow create, update: if isOwner(uid) || isAdmin();
+      allow read, delete: if isOwner(uid) || isAdmin();
+    }
+
+    // บันทึกประวัติการเปิดดูเลขบัตรประชาชนเต็ม (Audit Log ตามมาตรฐาน PDPA)
+    // บันทึกแล้วห้ามแก้ไขหรือลบเด็ดขาด เพื่อความโปร่งใสและตรวจสอบย้อนหลังได้
+    match /idcard_audit/{auditId} {
+      allow create, read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // =========================================================================
+    // 4. Collections: 'incidents', 'aeds', 'settings'
+    // =========================================================================
+    match /incidents/{incidentId} {
+      allow create: if isSignedIn();
+      allow read: if isAuthorizedStaff() || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      // เจ้าหน้าที่อัปเดตได้เต็มที่ (ห้ามเปลี่ยน severity ย้อนหลัง)
+      // ประชาชนอัปเดตได้เฉพาะเคสของตนเอง และทำได้เพียงยกเลิกเคส (status == 'cancelled') ซ่อนเคส หรือแก้ไขรายละเอียดที่เกิดเหตุ
+      allow update: if (
+        isAuthorizedStaff() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['severity'])
+      ) || (
+        isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'hiddenByUser', 'updatedAt', 'address', 'location', 'description', 'images'])
+        && (request.resource.data.status == resource.data.status || request.resource.data.status == 'cancelled')
+      );
+
+      allow delete: if isAdmin();
+
+      // Timeline ของเคส
+      match /timeline/{timelineId} {
+        allow read: if isAuthorizedStaff() || (isSignedIn() && get(/databases/$(database)/documents/incidents/$(incidentId)).data.userId == request.auth.uid);
+        allow create: if isAuthorizedStaff() || (isSignedIn() && get(/databases/$(database)/documents/incidents/$(incidentId)).data.userId == request.auth.uid);
+        allow update, delete: if isAuthorizedStaff();
+      }
+    }
+
+    // ข้อมูลจุดติดตั้งเครื่อง AED
+    match /aeds/{aedId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // การตั้งค่าระบบ เช่น พื้นที่ให้บริการ (settings/serviceArea)
+    match /settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
