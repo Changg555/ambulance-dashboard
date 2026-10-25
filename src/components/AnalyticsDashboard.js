@@ -6,6 +6,7 @@ import {
   useJsApiLoader,
 } from "@react-google-maps/api";
 import { toMillis } from "../hooks/useIncidents";
+import { INCIDENT_TYPES, SEVERITIES, STATUS_LABELS, toOptions } from "../constants/incident";
 
 const KPS_CENTER = { lat: 14.028746607870978, lng: 99.97823358223988 };
 
@@ -16,45 +17,6 @@ const MAP_OPTIONS = {
   streetViewControl: false,
   mapTypeControl: false,
   fullscreenControl: true,
-};
-
-/**
- * ป้ายกำกับสำหรับประเภทเหตุฉุกเฉินต่างๆ อิงจากฝั่ง Mobile (src/constants/incident.js)
- */
-const TYPE_LABELS = {
-  sos: "🚨 แจ้งเหตุด่วน (SOS)",
-  car_accident: "🚗 อุบัติเหตุรถ",
-  cardiac: "❤️ หัวใจ/หมดสติ",
-  injury: "🩹 บาดเจ็บ",
-  fire: "🔥 ไฟไหม้",
-  drowning: "🌊 จมน้ำ",
-  other: "⚠️ เหตุอื่น ๆ",
-};
-
-const TYPE_MAP_CONFIG = {
-  car_accident: { label: "🚗 อุบัติเหตุรถ", shortLabel: "อุบัติเหตุรถ", color: "#3B82F6" },
-  cardiac: { label: "❤️ หัวใจ/หมดสติ", shortLabel: "หัวใจ/หมดสติ", color: "#EC4899" },
-  injury: { label: "🩹 บาดเจ็บ", shortLabel: "บาดเจ็บ", color: "#F59E0B" },
-  fire: { label: "🔥 ไฟไหม้", shortLabel: "ไฟไหม้", color: "#EF4444" },
-  drowning: { label: "🌊 จมน้ำ", shortLabel: "จมน้ำ", color: "#06B6D4" },
-  sos: { label: "🚨 แจ้งเหตุด่วน (SOS)", shortLabel: "SOS", color: "#DC2626" },
-  other: { label: "⚠️ เหตุอื่น ๆ", shortLabel: "เหตุอื่น ๆ", color: "#64748B" },
-};
-
-const SEVERITY_MAP_CONFIG = {
-  critical: { label: "วิกฤต", color: "#EF4444" },
-  high: { label: "รุนแรง", color: "#F97316" },
-  medium: { label: "ปานกลาง", color: "#F59E0B" },
-  low: { label: "ไม่รุนแรง", color: "#22C55E" },
-};
-
-const STATUS_LABELS = {
-  pending: "รอเจ้าหน้าที่รับเรื่อง",
-  accepted: "เจ้าหน้าที่รับเรื่องแล้ว",
-  on_the_way: "กำลังเดินทางไปหาคุณ",
-  arrived: "ถึงจุดเกิดเหตุแล้ว",
-  completed: "ช่วยเหลือเสร็จสิ้น",
-  cancelled: "ยกเลิกแล้ว",
 };
 
 const DATE_PRESETS = [
@@ -72,12 +34,6 @@ function getCoordinates(location) {
     return null;
   }
   return { lat, lng };
-}
-
-function normalizeIncidentType(rawType) {
-  if (!rawType) return "other";
-  if (rawType === "vehicle_accident") return "car_accident";
-  return TYPE_MAP_CONFIG[rawType] ? rawType : "other";
 }
 
 function createMapMarkerIcon(color = "#EF4444") {
@@ -163,14 +119,13 @@ function isWithinDateRange(createdAtMs, datePreset, customStart, customEnd) {
 function countByType(incidents) {
   const result = {};
   incidents.forEach((item) => {
-    const rawType = item.type || "other";
-    const type = rawType === "vehicle_accident" ? "car_accident" : rawType;
+    const type = item.type || "other";
     result[type] = (result[type] || 0) + 1;
   });
   return Object.entries(result)
     .map(([type, count]) => ({
       type,
-      label: TYPE_LABELS[type] || type,
+      label: INCIDENT_TYPES[type]?.label || type,
       count,
     }))
     .sort((a, b) => b.count - a.count);
@@ -560,10 +515,9 @@ function AnalyticsIncidentMap({
 
   const getMarkerColor = (item) => {
     if (colorMode === "type") {
-      const normType = normalizeIncidentType(item.type);
-      return TYPE_MAP_CONFIG[normType]?.color || "#64748B";
+      return INCIDENT_TYPES[item.type]?.color || "#64748B";
     }
-    return SEVERITY_MAP_CONFIG[item.severity]?.color || "#EF4444";
+    return SEVERITIES[item.severity]?.color || "#EF4444";
   };
 
   return (
@@ -572,10 +526,10 @@ function AnalyticsIncidentMap({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-              🗺️ แผนที่แสดงสถิติจุดเกิดเหตุ
+              แผนที่แสดงสถิติจุดเกิดเหตุ
             </h2>
             <p className="text-xs font-medium text-slate-500 mt-0.5">
-              แสดงตำแหน่งการเกิดเหตุตามเงื่อนไขที่กรอง ({validIncidents.length} จุดที่มีพิกัด)
+              แสดงตำแหน่งการเกิดเหตุตามเงื่อนไข ({validIncidents.length} จุดที่มีพิกัด)
             </p>
           </div>
 
@@ -590,7 +544,7 @@ function AnalyticsIncidentMap({
                   : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              🏷️ สีตามประเภทเหตุ
+              สีตามประเภทเหตุ
             </button>
             <button
               type="button"
@@ -601,7 +555,7 @@ function AnalyticsIncidentMap({
                   : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              🚨 สีตามความรุนแรง
+              สีตามความรุนแรง
             </button>
           </div>
         </div>
@@ -609,7 +563,7 @@ function AnalyticsIncidentMap({
         {/* คำอธิบายสีหมุด (Legend) เปลี่ยนตามโหมดที่เลือก */}
         {colorMode === "type" ? (
           <div className="flex items-center gap-2 flex-wrap text-[11px] font-bold text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100">
-            {Object.entries(TYPE_MAP_CONFIG).map(([key, cfg]) => {
+            {Object.entries(INCIDENT_TYPES).map(([key, cfg]) => {
               const active = typeFilter === key;
               return (
                 <button
@@ -635,7 +589,7 @@ function AnalyticsIncidentMap({
           </div>
         ) : (
           <div className="flex items-center gap-2.5 flex-wrap text-[11px] font-bold text-slate-600 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100">
-            {Object.entries(SEVERITY_MAP_CONFIG).map(([key, cfg]) => {
+            {Object.entries(SEVERITIES).map(([key, cfg]) => {
               const active = severityFilter === key;
               return (
                 <button
@@ -696,7 +650,7 @@ function AnalyticsIncidentMap({
               >
                 <div className="p-1 min-w-[200px] font-sans">
                   <p className="font-bold text-slate-800 text-sm mb-1">
-                    {TYPE_LABELS[selectedIncident.type] ||
+                    {INCIDENT_TYPES[selectedIncident.type]?.label ||
                       selectedIncident.type ||
                       "เหตุฉุกเฉิน"}
                   </p>
@@ -704,7 +658,7 @@ function AnalyticsIncidentMap({
                     {selectedIncident.severity && (
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-red-50 text-red-600">
                         ความรุนแรง:{" "}
-                        {SEVERITY_MAP_CONFIG[selectedIncident.severity]?.label ||
+                        {SEVERITIES[selectedIncident.severity]?.label ||
                           selectedIncident.severity}
                       </span>
                     )}
@@ -721,7 +675,7 @@ function AnalyticsIncidentMap({
                   </p>
                   {selectedIncident.createdAt && (
                     <p className="text-slate-400 text-[11px] mt-1">
-                      🕒{" "}
+                      {" "}
                       {new Date(
                         toMillis(selectedIncident.createdAt)
                       ).toLocaleString("th-TH")}
@@ -758,8 +712,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
       if (!matchDate) return false;
 
       if (typeFilter !== "all") {
-        const normType = normalizeIncidentType(item.type);
-        if (normType !== typeFilter) return false;
+        if (item.type !== typeFilter) return false;
       }
 
       if (severityFilter !== "all" && item.severity !== severityFilter) {
@@ -845,12 +798,12 @@ export default function AnalyticsDashboard({ incidents = [] }) {
     const typeFilterLabel =
       typeFilter === "all"
         ? "ทุกประเภทเหตุ"
-        : TYPE_MAP_CONFIG[typeFilter]?.label || typeFilter;
+        : INCIDENT_TYPES[typeFilter]?.label || typeFilter;
 
     const severityFilterLabel =
       severityFilter === "all"
         ? "ทุกระดับความรุนแรง"
-        : SEVERITY_MAP_CONFIG[severityFilter]?.label || severityFilter;
+        : SEVERITIES[severityFilter]?.label || severityFilter;
 
     exportAnalyticsReportToCsv({
       summary: filteredSummary,
@@ -887,15 +840,15 @@ export default function AnalyticsDashboard({ incidents = [] }) {
 
   return (
     <div className="p-4 h-full overflow-y-auto custom-scrollbar bg-slate-50 space-y-6">
-      {/* แถบตัวกรองสถิติ: ช่วงเวลา + ประเภทเหตุฉุกเฉิน + ระดับความรุนแรง + ส่งออกรายงานสรุปสถิติ */}
+      {/* แถบงสถิติ: ช่วงเวลา + ประเภทเหตุฉุกเฉิน + ระดับความรุนแรง + ส่งออกรายงานสรุปสถิติ */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-              📊 ตัวกรองสถิติและการวิเคราะห์
+              สถิติและการวิเคราะห์
             </h2>
             <p className="text-xs font-medium text-slate-500">
-              วิเคราะห์ภาพรวมตามช่วงเวลา ประเภทเหตุ และระดับความรุนแรง พร้อมส่งออกรายงานสรุปเชิงสถิติ
+              วิเคราะห์ภาพรวมตามช่วงเวลา ประเภทเหตุ และระดับความรุนแรง และสร้างรายงานสรุปเชิงสถิติ
             </p>
           </div>
 
@@ -906,7 +859,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm self-start lg:self-auto"
             title="ส่งออกรายงานสรุปสถิติ (Overview KPIs, ความรุนแรง, ประเภทเหตุ, และสรุปรายวัน)"
           >
-            <span>📊</span> ส่งออกรายงานสรุปสถิติ (Analytics CSV)
+            สร้างรายงานสรุปสถิติ (Analytics CSV)
           </button>
         </div>
 
@@ -915,7 +868,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
           {/* ส่วนเลือกช่วงเวลา */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-slate-500 mr-1 whitespace-nowrap">
-              📅 ช่วงเวลา:
+              ช่วงเวลา:
             </span>
             {DATE_PRESETS.map((preset) => {
               const active = datePreset === preset.value;
@@ -958,7 +911,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 min-w-[210px]">
               <span className="text-xs font-bold text-slate-500 whitespace-nowrap">
-                🚨 ประเภทเหตุ:
+                ประเภทเหตุ:
               </span>
               <select
                 value={typeFilter}
@@ -966,7 +919,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
                 className="flex-1 bg-transparent text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
               >
                 <option value="all">ทุกประเภทเหตุ</option>
-                {Object.entries(TYPE_MAP_CONFIG).map(([key, cfg]) => (
+                {Object.entries(INCIDENT_TYPES).map(([key, cfg]) => (
                   <option key={key} value={key}>
                     {cfg.label}
                   </option>
@@ -976,7 +929,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
 
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 min-w-[190px]">
               <span className="text-xs font-bold text-slate-500 whitespace-nowrap">
-                ⚠️ ความรุนแรง:
+                ความรุนแรง:
               </span>
               <select
                 value={severityFilter}
@@ -984,10 +937,11 @@ export default function AnalyticsDashboard({ incidents = [] }) {
                 className="flex-1 bg-transparent text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
               >
                 <option value="all">ทุกระดับความรุนแรง</option>
-                <option value="critical">🔴 วิกฤต (Critical)</option>
-                <option value="high">🟠 รุนแรง (High)</option>
-                <option value="medium">🟡 ปานกลาง (Medium)</option>
-                <option value="low">🟢 ไม่รุนแรง (Low)</option>
+                {toOptions(SEVERITIES).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -997,19 +951,19 @@ export default function AnalyticsDashboard({ incidents = [] }) {
       {/* 4 กล่องสถิติหลักด้านบน */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
-          title="เคสในช่วงเวลาที่เลือก"
+          title="เหตุในช่วงเวลาที่เลือก"
           value={filteredSummary.total}
-          sub={`จากทั้งหมด ${incidents.length} เคสในระบบ`}
+          sub={`จากทั้งหมด ${incidents.length} เหตุในระบบ`}
         />
         <StatCard
           title="ช่วยเหลือเสร็จสิ้น"
           value={filteredSummary.completed}
-          sub="เคสที่ปิดงานสำเร็จ"
+          sub="เหตุที่ช่วยเหลือสำเร็จ"
         />
         <StatCard
           title="กำลังดำเนินการ"
           value={filteredSummary.active}
-          sub="เคสที่ยังไม่เสร็จสิ้น"
+          sub="เหตุที่ยังไม่เสร็จสิ้น"
         />
         <StatCard
           title="เวลาตอบสนองเฉลี่ย"
@@ -1024,7 +978,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
         <div className="space-y-6">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-              📊 สถิติตามประเภทเหตุฉุกเฉิน
+              สถิติตามประเภทเหตุฉุกเฉิน
             </h2>
             {typeStats.length === 0 ? (
               <p className="text-slate-400 text-center py-8 font-medium">
@@ -1046,7 +1000,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
 
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              🚨 สถิติตามระดับความรุนแรง
+              สถิติตามระดับความรุนแรง
             </h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <StatusBox
@@ -1074,7 +1028,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
 
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              📈 สถิติตามสถานะการดำเนินงาน
+              สถิติตามสถานะการดำเนินงาน
             </h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <StatusBox
@@ -1125,7 +1079,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
         <div className="mb-6">
           <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-            🗓️ สถิติการออกเหตุแยกตามวันที่ (Daily Statistics)
+            สถิติเหตุฉุกเฉินแยกตามวันที่ (Daily Statistics)
           </h2>
           <p className="text-xs font-medium text-slate-500 mt-1">
             สรุปจำนวนเคส ความรุนแรง สถานะ และเวลาตอบสนองเฉลี่ยแยกตามรายวัน ({dailyStats.length} วันที่มีการแจ้งเหตุ)

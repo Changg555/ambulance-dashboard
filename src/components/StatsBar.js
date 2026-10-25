@@ -43,10 +43,12 @@ function getStatValue(stats, key) {
 function StatCard({ label, value, valueClassName, cardClassName }) {
   return (
     <div
-      className={`flex flex-col justify-center rounded-2xl px-5 py-4 border ${cardClassName} shadow-sm`}
+      className={`flex flex-col justify-center rounded-xl px-4 py-3 border ${cardClassName} shadow-sm`}
     >
-      <p className="text-sm font-semibold text-slate-500 mb-1">{label}</p>
-      <p className={`text-3xl font-bold ${valueClassName}`}>{value}</p>
+      <p className="text-xs font-semibold text-slate-500 mb-0.5">
+        {label}
+      </p>
+      <p className={`text-2xl font-bold ${valueClassName}`}>{value}</p>
     </div>
   );
 }

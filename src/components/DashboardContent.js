@@ -4,6 +4,9 @@ import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
 import { useIncidents } from "../hooks/useIncidents";
 
+import { INCIDENT_TYPES, SEVERITIES, SORT_OPTIONS, toOptions } from "../constants/incident";
+import { sortIncidents } from "../utils/sortIncidents";
+
 import IncidentMap from "./IncidentMap";
 import IncidentCard from "./IncidentCard";
 import StatsBar from "./StatsBar";
@@ -22,11 +25,10 @@ import EmergencyAlertModal from "./EmergencyAlertModal";
 const TabButton = ({ active, onClick, children }) => (
   <button
     onClick={onClick}
-    className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 ${
-      active
+    className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 ${active
         ? "bg-white text-red-600 shadow-sm scale-105"
         : "bg-transparent text-red-50 hover:bg-white/10"
-    }`}
+      }`}
   >
     {children}
   </button>
@@ -86,13 +88,6 @@ const DashboardHeader = ({ user, profile, role, tab, setTab }) => {
   );
 };
 
-const SEVERITY_RANK = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-};
-
 // --- Main Component ---
 
 export default function DashboardContent({ user, profile, role }) {
@@ -128,25 +123,8 @@ export default function DashboardContent({ user, profile, role }) {
       return matchSeverity && matchType;
     });
 
-    return [...filtered].sort((a, b) => {
-      const rankA = SEVERITY_RANK[a.severity] || 0;
-      const rankB = SEVERITY_RANK[b.severity] || 0;
-      const timeA = a.createdAt || 0;
-      const timeB = b.createdAt || 0;
+    return sortIncidents(filtered, sortBy);
 
-      if (sortBy === "severity_desc") {
-        if (rankB !== rankA) return rankB - rankA;
-        return timeB - timeA;
-      }
-      if (sortBy === "severity_asc") {
-        if (rankA !== rankB) return rankA - rankB;
-        return timeB - timeA;
-      }
-      if (sortBy === "oldest") {
-        return timeA - timeB;
-      }
-      return timeB - timeA;
-    });
   }, [activeIncidents, severityFilter, typeFilter, sortBy]);
 
   // เก็บ ID เคสที่เจ้าหน้าที่กด "รับทราบเคส" แล้ว เพื่อปิดป๊อปอัปและหยุดเสียงเตือน
@@ -194,12 +172,12 @@ export default function DashboardContent({ user, profile, role }) {
             <StatsBar stats={stats} />
             <div className="flex flex-1 overflow-hidden gap-4 p-4">
               {/* รายการเหตุการณ์ด้านซ้าย */}
-              <div className="w-[440px] flex flex-col gap-3 overflow-hidden">
+              <div className="w-[460px] flex flex-col gap-3 overflow-hidden">
                 {/* แถบตัวกรองและเรียงลำดับเคสตามความรุนแรงและประเภทเหตุสำหรับเจ้าหน้าที่ */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm flex flex-col gap-2 shrink-0">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-600">
-                      🚨 รายการเคสที่กำลังดำเนินการ ({displayedActiveIncidents.length})
+                      รายการเหตุฉุกเฉินที่กำลังดำเนินการ ({displayedActiveIncidents.length})
                     </span>
                     {(severityFilter !== "all" || typeFilter !== "all") && (
                       <button
@@ -217,17 +195,14 @@ export default function DashboardContent({ user, profile, role }) {
                   <div className="grid grid-cols-1 gap-2">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                        เรียงลำดับเคส
+                        เรียงลำดับเหตุ
                       </label>
                       <select
                         value={sortBy}
                         onChange={(e) => setSortBy(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                        className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
                       >
-                        <option value="severity_desc">🔥 ความรุนแรง: วิกฤต → ไม่รุนแรง</option>
-                        <option value="severity_asc">🟢 ความรุนแรง: ไม่รุนแรง → วิกฤต</option>
-                        <option value="newest">🕒 เวลาแจ้ง: ล่าสุดก่อน</option>
-                        <option value="oldest">⏳ เวลาแจ้ง: รอนานสุดก่อน</option>
+                        {SORT_OPTIONS.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
                       </select>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -238,16 +213,10 @@ export default function DashboardContent({ user, profile, role }) {
                         <select
                           value={typeFilter}
                           onChange={(e) => setTypeFilter(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                          className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
                         >
                           <option value="all">ทุกประเภทเหตุ</option>
-                          <option value="sos">🚨 แจ้งเหตุด่วน (SOS)</option>
-                          <option value="car_accident">🚗 อุบัติเหตุรถ</option>
-                          <option value="cardiac">❤️ หัวใจ/หมดสติ</option>
-                          <option value="injury">🩹 บาดเจ็บ</option>
-                          <option value="fire">🔥 ไฟไหม้</option>
-                          <option value="drowning">🌊 จมน้ำ</option>
-                          <option value="other">⚠️ เหตุอื่น ๆ</option>
+                          {toOptions(INCIDENT_TYPES).map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
                         </select>
                       </div>
                       <div>
@@ -257,13 +226,9 @@ export default function DashboardContent({ user, profile, role }) {
                         <select
                           value={severityFilter}
                           onChange={(e) => setSeverityFilter(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                          className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
                         >
-                          <option value="all">ทุกระดับความรุนแรง</option>
-                          <option value="critical">🔴 วิกฤต (Critical)</option>
-                          <option value="high">🟠 รุนแรง (High)</option>
-                          <option value="medium">🟡 ปานกลาง (Medium)</option>
-                          <option value="low">🟢 ไม่รุนแรง (Low)</option>
+                          {toOptions(SEVERITIES).map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
                         </select>
                       </div>
                     </div>

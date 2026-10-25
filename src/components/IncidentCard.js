@@ -1,34 +1,13 @@
 import React, { useState } from "react";
 import { toMillis } from "../hooks/useIncidents";
 import ReporterDetailModal from "./ReporterDetailModal";
+import { INCIDENT_TYPES, SEVERITIES, STATUS_FLOW, STATUS_LABELS } from "../constants/incident";
 
-// ป้ายกำกับประเภทเหตุฉุกเฉิน อิงจากฝั่ง Mobile (src/constants/incident.js)
-const TYPE_LABELS = {
-  sos: "🚨 แจ้งเหตุด่วน (SOS)",
-  car_accident: "🚗 อุบัติเหตุรถ",
-  cardiac: "❤️ หัวใจ/หมดสติ",
-  injury: "🩹 บาดเจ็บ",
-  fire: "🔥 ไฟไหม้",
-  drowning: "🌊 จมน้ำ",
-  other: "⚠️ เหตุอื่น ๆ",
-};
-
-// ระดับความรุนแรง อิงจากฝั่ง Mobile (src/constants/incident.js)
-const SEVERITY_CONFIG = {
-  low: { label: "ไม่รุนแรง", className: "bg-emerald-100 text-emerald-700" },
-  medium: { label: "ปานกลาง", className: "bg-amber-100 text-amber-700" },
-  high: { label: "รุนแรง", className: "bg-orange-100 text-orange-700" },
-  critical: { label: "วิกฤต", className: "bg-red-100 text-red-700" },
-};
-
-// ป้ายกำกับสถานะของเคส อิงตามฝั่ง Mobile
-const STATUS_LABELS = {
-  pending: "รอเจ้าหน้าที่รับเรื่อง",
-  accepted: "เจ้าหน้าที่รับเรื่องแล้ว",
-  on_the_way: "กำลังเดินทางไปหาคุณ",
-  arrived: "ถึงจุดเกิดเหตุแล้ว",
-  completed: "ช่วยเหลือเสร็จสิ้น",
-  cancelled: "ยกเลิกแล้ว",
+const SEVERITY_CLASSNAMES = {
+  low: "bg-emerald-100 text-emerald-700",
+  medium: "bg-amber-100 text-amber-700",
+  high: "bg-orange-100 text-orange-700",
+  critical: "bg-red-100 text-red-700",
 };
 
 // ลำดับปุ่มเปลี่ยนสถานะที่เจ้าหน้าที่สามารถกดได้ (ใช้ค่าตรงกับ Mobile STATUS_FLOW)
@@ -38,9 +17,6 @@ const STATUS_OPTIONS = [
   { value: "arrived", label: "ถึงจุดเกิดเหตุ" },
   { value: "completed", label: "เสร็จสิ้น" },
 ];
-
-// flow สถานะที่บังคับให้เปลี่ยนทีละขั้นเพื่อกันการข้ามขั้นตอน (ตรงกับ Mobile STATUS_FLOW)
-const STATUS_FLOW = ["pending", "accepted", "on_the_way", "arrived", "completed"];
 
 // ข้อความยืนยัน action ที่มีผลต่อข้อมูลจริง
 const CONFIRM_MESSAGES = {
@@ -135,7 +111,7 @@ function IncidentHeader({ incident, currentStatus }) {
     <div className="flex items-start justify-between gap-2">
       <div>
         <h3 className="font-bold text-slate-800 text-lg">
-          {TYPE_LABELS[incident.type] || incident.type || "ไม่ระบุเหตุ"}
+          {INCIDENT_TYPES[incident.type]?.label || incident.type || "ไม่ระบุเหตุ"}
         </h3>
 
         <div className="flex items-center gap-2 mt-1.5">
@@ -161,12 +137,12 @@ function IncidentHeader({ incident, currentStatus }) {
 
 // badge ข้อมูลเสริม เช่น ความรุนแรง โหมดการแจ้งเหตุ พื้นที่บริการ และระยะห่างจากศูนย์
 function IncidentMetaBadges({ incident }) {
-  const severityInfo = SEVERITY_CONFIG[incident.severity];
+  const severityInfo = SEVERITIES[incident.severity]
 
   return (
     <div className="flex gap-2 flex-wrap mt-3.5">
       {severityInfo && (
-        <Badge className={severityInfo.className}>
+        <Badge className={SEVERITY_CLASSNAMES[incident.severity]}>
           ความรุนแรง: {severityInfo.label}
         </Badge>
       )}
@@ -196,7 +172,7 @@ function IncidentReporterInfo({ reporter, assignedTo, hasReporterUid, onViewRepo
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-slate-600 font-medium">
-              👤 ผู้แจ้ง:{" "}
+              ผู้แจ้ง:{" "}
               <strong className="text-slate-800">{reporter?.name || "-"}</strong>
             </span>
             <button
@@ -207,7 +183,7 @@ function IncidentReporterInfo({ reporter, assignedTo, hasReporterUid, onViewRepo
               }}
               className="text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-lg shadow-sm transition flex items-center gap-1"
             >
-              <span>🪪</span> ดูข้อมูลผู้แจ้ง
+              ดูข้อมูลผู้แจ้ง
             </button>
           </div>
           {reporter?.phone && (
@@ -225,7 +201,7 @@ function IncidentReporterInfo({ reporter, assignedTo, hasReporterUid, onViewRepo
       {assignedTo && (
         <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
           <span className="text-slate-600 font-medium">
-            🚑 ผู้รับผิดชอบ:{" "}
+            ผู้รับผิดชอบ:{" "}
             <strong className="text-slate-800">
               {assignedTo.name || "-"}
               {assignedTo.vehicle ? ` (${assignedTo.vehicle})` : ""}
@@ -259,12 +235,12 @@ function IncidentLocation({ incident }) {
   return (
     <div className="mt-3">
       <p className="text-[13px] font-medium text-slate-500 flex items-start gap-1.5">
-        <span className="text-red-500">📍</span>
-        <span className="leading-snug">{address}</span>
+        {/* <span className="text-red-500">📍</span> */}
+        <span className="leading-snug ml-3">{address}</span>
       </p>
 
       {coords && (
-        <p className="text-[11px] font-mono text-slate-400 mt-1.5 ml-5">
+        <p className="text-[11px] font-mono text-slate-400 mt-1.5 ml-3">
           {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
           {incident.location?.source ? ` (${incident.location.source})` : ""}
         </p>
@@ -279,7 +255,7 @@ function IncidentImages({ incident, onPreview }) {
   if (imageList.length === 0) return null;
 
   return (
-    <div className="mt-4">
+    <div className="mt-4 ml-3 mr-3">
       <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
         รูปภาพ ({imageList.length})
       </p>
