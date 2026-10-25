@@ -27,7 +27,7 @@ const MAP_OPTIONS = {
 };
 
 const CENTER_MARKER_LABEL = {
-  text: "จุดศูนย์สั่งกลาง",
+  text: "จุดศูนย์กลาง",
   color: "#FFFFFF",
   fontWeight: "bold",
   fontSize: "12px",
@@ -254,10 +254,10 @@ export default function ServiceAreaManager() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            🌐 จัดการรัศมีและพื้นที่ให้บริการ (Service Area)
+            จัดการพื้นที่ให้บริการ (Service Area)
           </h1>
           <p className="text-xs font-medium text-slate-500 mt-1">
-            กำหนดขอบเขตรัศมีการให้บริการของศูนย์สั่งการรถพยาบาลฉุกเฉิน ม.เกษตรศาสตร์ วิทยาเขตกำแพงแสน
+            กำหนดขอบเขตการให้บริการของรถพยาบาลฉุกเฉิน ม.เกษตรศาสตร์ วิทยาเขตกำแพงแสน
           </p>
         </div>
 
@@ -295,7 +295,7 @@ export default function ServiceAreaManager() {
         {/* คอลัมน์ซ้าย (5 คอลัมน์): แผงควบคุมตั้งค่าพื้นที่ */}
         <div className="xl:col-span-5 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
           <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-            ⚙️ ตั้งค่าขอบเขตพื้นที่ให้บริการ
+            ตั้งค่าพื้นที่ให้บริการ
           </h2>
 
           <form onSubmit={handleSave} className="space-y-4">
@@ -339,7 +339,7 @@ export default function ServiceAreaManager() {
             {/* พิกัดจุดศูนย์กลาง */}
             <div className="space-y-2 bg-slate-50/80 p-3 rounded-xl border border-slate-200/80">
               <span className="text-xs font-bold text-slate-600 block">
-                📍 พิกัดจุดศูนย์กลาง (ศูนย์สั่งการ)
+                พิกัดจุดศูนย์กลาง
               </span>
 
               <div className="grid grid-cols-2 gap-2">
@@ -372,7 +372,7 @@ export default function ServiceAreaManager() {
             <div className="space-y-2.5 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-600">
-                  ⭕ รัศมีครอบคลุมการให้บริการ
+                  รัศมีครอบคลุมการให้บริการ
                 </label>
                 <span className="text-sm font-extrabold text-red-600 font-mono">
                   {radiusNum.toLocaleString()} ม. ({(radiusNum / 1000).toFixed(2)} กม.)
@@ -419,7 +419,7 @@ export default function ServiceAreaManager() {
                 disabled={saving}
                 className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs sm:text-sm shadow-sm transition"
               >
-                {saving ? "กำลังบันทึก..." : "💾 บันทึกการตั้งค่าพื้นที่บริการ"}
+                {saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่าพื้นที่บริการ"}
               </button>
 
               <button
@@ -428,7 +428,7 @@ export default function ServiceAreaManager() {
                 disabled={saving}
                 className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2 rounded-xl text-xs transition"
               >
-                🔄 รีเซ็ตค่ามาตรฐาน
+                รีเซ็ตค่ามาตรฐาน
               </button>
             </div>
           </form>
@@ -438,10 +438,10 @@ export default function ServiceAreaManager() {
         <div className="xl:col-span-7 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-3">
           <div>
             <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-              🗺️ ขอบเขตวงรัศมีบนแผนที่
+              ขอบเขตวงรัศมีบนแผนที่
             </h2>
             <p className="text-xs text-slate-500">
-              คลิกบนแผนที่ หรือลากหมุดศูนย์สั่งการ เพื่อย้ายตำแหน่งศูนย์กลางแบบ Real-time
+              คลิกบนแผนที่ หรือลากหมุด เพื่อย้ายตำแหน่งศูนย์กลางแบบ
             </p>
           </div>
 

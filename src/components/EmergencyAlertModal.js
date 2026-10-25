@@ -5,7 +5,6 @@ const TYPE_CONFIG = {
   sos: {
     label: "แจ้งเหตุด่วน (SOS)",
     subLabel: "ผู้ใช้กดปุ่ม SOS ฉุกเฉิน",
-    icon: "🚨",
     lightBg: "bg-red-50",
     border: "border-red-300",
     text: "text-red-700",
@@ -14,7 +13,6 @@ const TYPE_CONFIG = {
   car_accident: {
     label: "อุบัติเหตุทางถนน / รถชน",
     subLabel: "อุบัติเหตุยานพาหนะ",
-    icon: "🚗",
     lightBg: "bg-blue-50",
     border: "border-blue-300",
     text: "text-blue-700",
@@ -23,7 +21,6 @@ const TYPE_CONFIG = {
   cardiac: {
     label: "หัวใจวาย / หมดสติ",
     subLabel: "ระบบไหลเวียนโลหิต / ไม่ตอบสนอง",
-    icon: "🫀",
     lightBg: "bg-rose-50",
     border: "border-rose-300",
     text: "text-rose-700",
@@ -32,7 +29,6 @@ const TYPE_CONFIG = {
   injury: {
     label: "บาดเจ็บจากอุบัติเหตุ",
     subLabel: "แผลภายนอก / กระดูกหัก",
-    icon: "🩹",
     lightBg: "bg-amber-50",
     border: "border-amber-300",
     text: "text-amber-800",
@@ -41,7 +37,6 @@ const TYPE_CONFIG = {
   fire: {
     label: "อัคคีภัย / ไฟไหม้",
     subLabel: "เหตุไฟไหม้ / ควันพิษ",
-    icon: "🔥",
     lightBg: "bg-orange-50",
     border: "border-orange-300",
     text: "text-orange-700",
@@ -50,7 +45,6 @@ const TYPE_CONFIG = {
   drowning: {
     label: "จมน้ำ / สำลักน้ำ",
     subLabel: "ภาวะขาดอากาศจากน้ำ",
-    icon: "🌊",
     lightBg: "bg-cyan-50",
     border: "border-cyan-300",
     text: "text-cyan-700",
@@ -59,7 +53,6 @@ const TYPE_CONFIG = {
   other: {
     label: "เหตุฉุกเฉินอื่น ๆ",
     subLabel: "เหตุทั่วไปที่ต้องการความช่วยเหลือ",
-    icon: "⚠️",
     lightBg: "bg-slate-50",
     border: "border-slate-300",
     text: "text-slate-700",
@@ -172,7 +165,6 @@ export default function EmergencyAlertModal({
     SEVERITY_CONFIG[currentIncident.severity] || {
       label: currentIncident.severity || "ไม่ระบุ",
       levelText: "ไม่ได้ระบุระดับความรุนแรง",
-      icon: "⚪",
       badge: "bg-slate-600 text-white",
       cardBg: "bg-slate-50",
       border: "border-slate-300",
@@ -323,10 +315,7 @@ export default function EmergencyAlertModal({
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-extrabold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
-                  <span>🚨</span> ประเภทเหตุฉุกเฉิน
-                </span>
-                <span className="text-3xl filter drop-shadow-sm">
-                  {typeCfg.icon}
+                  ประเภทเหตุฉุกเฉิน
                 </span>
               </div>
               <div>
@@ -345,7 +334,7 @@ export default function EmergencyAlertModal({
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-extrabold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
-                  <span>⚡</span> ระดับความรุนแรง
+                  ระดับความรุนแรง
                 </span>
                 <div className="flex items-center gap-1.5">
                   {sevCfg.ping && (
@@ -354,7 +343,6 @@ export default function EmergencyAlertModal({
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
                     </span>
                   )}
-                  <span className="text-2xl">{sevCfg.icon}</span>
                 </div>
               </div>
               <div>

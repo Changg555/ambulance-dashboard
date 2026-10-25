@@ -630,7 +630,7 @@ export default function LoginScreen() {
             />
 
             <FormInput
-              label="รหัสผ่าน (อย่างน้อย 8 ตัวอักษร มีตัวอักษรและตัวเลข)"
+              label="รหัสผ่าน"
               type="password"
               placeholder="ตั้งรหัสผ่าน"
               value={regPassword}
@@ -645,9 +645,9 @@ export default function LoginScreen() {
               onChange={setRegConfirmPassword}
             />
 
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 text-xs text-amber-800">
-              ℹ️ หลังยืนยันรหัส OTP และสมัครสมาชิกแล้ว บัญชีจะมีสถานะ{" "}
-              <strong>รออนุมัติ (Pending)</strong> จนกว่า Admin จะอนุมัติสิทธิ์
+            <div className="text-xs text-slate-600">
+              หลังยืนยันรหัส OTP และสมัครสมาชิกแล้ว บัญชีจะมีสถานะ{" "}
+              <strong>รออนุมัติ </strong> จนกว่า Admin จะอนุมัติสิทธิ์
             </div>
 
             <button

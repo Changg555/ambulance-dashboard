@@ -7,6 +7,7 @@ import {
 } from '@react-google-maps/api';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { INCIDENT_TYPES, STATUS_COLORS, STATUS_LABELS } from "../constants/incident";
 
 // ค่ากลางเริ่มต้น (สถานพยาบาล ม.เกษตรฯ กำแพงแสน) และสถานะที่ใช้ร่วมกันในแผนที่
 const KPS_CENTER = { lat: 14.028746607870978, lng: 99.97823358223988 };
@@ -18,22 +19,6 @@ const MAP_OPTIONS = {
   streetViewControl: false,
   mapTypeControl: false,
   fullscreenControl: true,
-};
-const TYPE_LABELS = {
-  sos: '🚨 แจ้งเหตุด่วน (SOS)',
-  car_accident: '🚗 อุบัติเหตุรถ',
-  cardiac: '❤️ หัวใจ/หมดสติ',
-  injury: '🩹 บาดเจ็บ',
-  fire: '🔥 ไฟไหม้',
-  drowning: '🌊 จมน้ำ',
-  other: '⚠️ เหตุอื่น ๆ',
-};
-const STATUS_CONFIG = {
-  pending: { color: '#EF4444', label: 'รอเจ้าหน้าที่รับเรื่อง' },
-  accepted: { color: '#3B82F6', label: 'เจ้าหน้าที่รับเรื่องแล้ว' },
-  on_the_way: { color: '#8B5CF6', label: 'กำลังเดินทางไปหาคุณ' },
-  arrived: { color: '#14B884', label: 'ถึงจุดเกิดเหตุแล้ว' },
-  completed: { color: '#16A34A', label: 'ช่วยเหลือเสร็จสิ้น' },
 };
 const FALLBACK_MARKER_COLOR = '#94A3B8';
 
@@ -91,7 +76,7 @@ function createMarkerIcon(color, isOutside) {
 // แสดงป้ายสถานะของเหตุการณ์ใน InfoWindow
 function IncidentStatus({ status }) {
   const currentStatus = status || 'pending';
-  const label = STATUS_CONFIG[currentStatus]?.label || status || 'ไม่ระบุสถานะ';
+  const label = STATUS_LABELS[currentStatus] || status || 'ไม่ระบุสถานะ';
 
   return (
     <p className="text-[11px] font-bold text-red-500 bg-red-50 inline-block px-2 py-0.5 rounded-md mb-2">
@@ -127,7 +112,7 @@ function IncidentInfoWindow({ incident, onClose }) {
     <InfoWindow position={position} onCloseClick={onClose}>
       <div className="p-1 min-w-[200px] font-sans">
         <p className="font-bold text-slate-800 text-sm mb-1">
-          {TYPE_LABELS[incident.type] || incident.type || 'เหตุฉุกเฉิน'}
+          {INCIDENT_TYPES[incident.type]?.label || incident.type || 'เหตุฉุกเฉิน'}
         </p>
         <IncidentStatus status={incident.status} />
         {incident.reporter && (
@@ -139,7 +124,7 @@ function IncidentInfoWindow({ incident, onClose }) {
           <ServiceAreaStatus isInside={incident.isInsideServiceArea} />
         </div>
         <p className="text-slate-600 text-xs font-medium leading-relaxed mt-1">
-          📍 {address}
+          {address}
         </p>
         {incident.description && (
           <div className="mt-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
@@ -158,7 +143,7 @@ function IncidentInfoWindow({ incident, onClose }) {
 function IncidentMarkers({ incidents, selectedId, onMarkerClick }) {
   return incidents.map((incident) => {
     const status = incident.status || 'pending';
-    const color = STATUS_CONFIG[status]?.color || FALLBACK_MARKER_COLOR;
+    const color = STATUS_COLORS[status] || FALLBACK_MARKER_COLOR;
     const position = getCoordinates(incident.location);
     const isSelected = selectedId === incident.id;
     const isOutside = incident.isInsideServiceArea === false;
@@ -373,7 +358,7 @@ export default function IncidentMap({
             }}
             className="bg-white/95 hover:bg-white text-slate-800 text-xs font-bold px-3 py-2 rounded-xl shadow-md border border-slate-200 transition-all"
           >
-            📍 ไปที่จุดเกิดเหตุ ({validIncidents.length})
+           ไปที่จุดเกิดเหตุ ({validIncidents.length})
           </button>
         )}
         <button
@@ -381,14 +366,14 @@ export default function IncidentMap({
           onClick={() => panToCoord(serviceCenter, 15)}
           className="bg-white/95 hover:bg-white text-slate-700 text-xs font-bold px-3 py-2 rounded-xl shadow-md border border-slate-200 transition-all"
         >
-          🏥 ศูนย์กลางพื้นที่บริการ
+          ศูนย์กลางพื้นที่บริการ
         </button>
         <button
           type="button"
           onClick={goToMyBrowserLocation}
           className="bg-white/95 hover:bg-white text-red-600 text-xs font-bold px-3 py-2 rounded-xl shadow-md border border-slate-200 transition-all"
         >
-          🎯 ตำแหน่งปัจจุบันของฉัน
+          ตำแหน่งปัจจุบันของฉัน
         </button>
       </div>
     </div>

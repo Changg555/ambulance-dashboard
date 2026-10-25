@@ -12,16 +12,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
-
-// ข้อความสถานะฝั่ง Mobile (src/constants/incident.js)
-export const MOBILE_STATUS_LABEL = {
-  pending: "รอเจ้าหน้าที่รับเรื่อง",
-  accepted: "เจ้าหน้าที่รับเรื่องแล้ว",
-  on_the_way: "กำลังเดินทางไปหาคุณ",
-  arrived: "ถึงจุดเกิดเหตุแล้ว",
-  completed: "ช่วยเหลือเสร็จสิ้น",
-  cancelled: "ยกเลิกแล้ว",
-};
+import { CLOSED_STATUSES, STATUS_LABELS } from "../constants/incident";
 
 // แปลงค่าเวลา (Firestore Timestamp / Date / number / ISO string) ให้เป็น milliseconds
 export function toMillis(val) {
@@ -69,14 +60,11 @@ export function useIncidents({ user, profile } = {}) {
         const hasValidCoords =
           Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
         const address = data.address || data.location?.address || "";
-        const rawType = data.type || "other";
-        const normalizedType =
-          rawType === "vehicle_accident" ? "car_accident" : rawType;
 
         return {
           id,
           ...data,
-          type: normalizedType,
+          type: data.type || "other",
           caseNumber: data.caseNumber || `KPS-${id.slice(0, 8).toUpperCase()}`,
           status: data.status || "pending",
           address,
@@ -129,8 +117,8 @@ export function useIncidents({ user, profile } = {}) {
                   id: d.id,
                   ...tlData,
                   status: st,
-                  note: tlData.note || tlData.label || MOBILE_STATUS_LABEL[st] || st,
-                  label: tlData.note || tlData.label || MOBILE_STATUS_LABEL[st] || st,
+                  note: tlData.note || tlData.label || STATUS_LABELS[st] || st,
+                  label: tlData.note || tlData.label || STATUS_LABELS[st] || st,
                   time: timeMs,
                 };
               });
@@ -289,18 +277,14 @@ export function useIncidents({ user, profile } = {}) {
   const activeIncidents = useMemo(() => {
     return incidents.filter(
       (item) =>
-        !item.archived &&
-        item.status !== "completed" &&
-        item.status !== "cancelled"
+        !item.archived && !CLOSED_STATUSES.includes(item.status)
     );
   }, [incidents]);
 
   const historyIncidents = useMemo(() => {
     return incidents.filter(
       (item) =>
-        item.archived ||
-        item.status === "completed" ||
-        item.status === "cancelled"
+        item.archived || CLOSED_STATUSES.includes(item.status)
     );
   }, [incidents]);
 
@@ -318,9 +302,7 @@ export function useIncidents({ user, profile } = {}) {
 
     const activeCases = incidents.filter(
       (item) =>
-        !item.archived &&
-        item.status !== "completed" &&
-        item.status !== "cancelled"
+        !item.archived && !CLOSED_STATUSES.includes(item.status)
     );
 
     const completedWithTime = completedCases.filter(
@@ -395,7 +377,7 @@ export function useIncidents({ user, profile } = {}) {
     batch.update(incRef, payload);
     batch.set(tlRef, {
       status: firestoreStatus,
-      note: customNote?.trim() || MOBILE_STATUS_LABEL[firestoreStatus] || firestoreStatus,
+      note: customNote?.trim() || STATUS_LABELS[firestoreStatus] || firestoreStatus,
       at: serverTimestamp(),
     });
 
@@ -419,7 +401,7 @@ export function useIncidents({ user, profile } = {}) {
 
     batch.set(tlRef, {
       status: "cancelled",
-      note: MOBILE_STATUS_LABEL.cancelled,
+      note: STATUS_LABELS.cancelled,
       at: serverTimestamp(),
     });
 

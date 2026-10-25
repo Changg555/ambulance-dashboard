@@ -250,7 +250,6 @@ export default function ReporterDetailModal({
         {/* Header */}
         <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <span className="text-xl">🪪</span>
             <div>
               <h3 className="font-bold text-base">ข้อมูลผู้แจ้งเหตุฉุกเฉิน</h3>
               <p className="text-[11px] text-slate-400">
@@ -299,7 +298,7 @@ export default function ReporterDetailModal({
                       href={`tel:${phone}`}
                       className="font-bold text-emerald-600 hover:underline mt-0.5 inline-block"
                     >
-                      📞 {phone}
+                      {phone}
                     </a>
                   ) : (
                     <p className="font-semibold text-slate-700 mt-0.5">-</p>
@@ -343,7 +342,7 @@ export default function ReporterDetailModal({
                           {revealedIdCard}
                         </span>
                         <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-md">
-                          ⏱ ซ่อนอัตโนมัติใน {secondsLeft} วินาที
+                          ซ่อนอัตโนมัติใน {secondsLeft} วินาที
                         </span>
                       </div>
                     ) : (
@@ -363,7 +362,7 @@ export default function ReporterDetailModal({
                           disabled={unlocking}
                           className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm transition"
                         >
-                          {unlocking ? "กำลังถอดรหัส..." : "🔓 ดูเลขเต็ม (Admin)"}
+                          {unlocking ? "กำลังถอดรหัส..." : "ดูเลขเต็ม (Admin)"}
                         </button>
                       ) : (
                         <button
@@ -374,7 +373,7 @@ export default function ReporterDetailModal({
                           }}
                           className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl transition"
                         >
-                          🙈 ซ่อนเลขบัตร
+                          ซ่อนเลขบัตร
                         </button>
                       )}
 
@@ -385,7 +384,7 @@ export default function ReporterDetailModal({
                           title="ล้าง Private Key ออกจากหน่วยความจำ"
                           className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3 py-2 rounded-xl transition"
                         >
-                          🔒 ล็อกคีย์
+                          ล็อกคีย์
                         </button>
                       )}
                     </div>
@@ -411,7 +410,7 @@ export default function ReporterDetailModal({
                     className="mt-3 pt-3 border-t border-slate-200 space-y-3 bg-white p-4 rounded-xl border"
                   >
                     <p className="text-xs font-bold text-slate-800">
-                      🔑 ปลดล็อก Private Key ของแอดมิน (ทำครั้งแรกในเซสชัน)
+                      ปลดล็อก Private Key ของแอดมิน (ทำครั้งแรกในเซสชัน)
                     </p>
                     <p className="text-[11px] text-slate-500">
                       เลือกไฟล์ <code className="font-mono bg-slate-100 px-1 rounded">idcard-key.enc.json</code> และกรอกรหัสผ่านแอดมิน (คีย์จะถูกเก็บไว้ในหน่วยความจำชั่วคราวเท่านั้น ไม่บันทึกลงดิสก์)

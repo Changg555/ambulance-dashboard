@@ -2,83 +2,25 @@ import React, { useMemo, useState } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 import { toMillis } from "../hooks/useIncidents";
 import ReporterDetailModal from "./ReporterDetailModal";
+import { INCIDENT_TYPES, SEVERITIES, STATUS_LABELS, SORT_OPTIONS, toOptions } from "../constants/incident";
+import { sortIncidents } from "../utils/sortIncidents";
+import { csvCell, rowsToCsv, downloadCsv, isoDate, isoTime, maskPhone } from "../utils/csv";
+import { diffMin, round1 } from "../utils/analyticsStats";
 
-// ป้ายกำกับประเภทเหตุฉุกเฉิน อิงจากฝั่ง Mobile (src/constants/incident.js)
-const TYPE_LABELS = {
-  sos: "🚨 แจ้งเหตุด่วน (SOS)",
-  car_accident: "🚗 อุบัติเหตุรถ",
-  cardiac: "❤️ หัวใจ/หมดสติ",
-  injury: "🩹 บาดเจ็บ",
-  fire: "🔥 ไฟไหม้",
-  drowning: "🌊 จมน้ำ",
-  other: "⚠️ เหตุอื่น ๆ",
-};
-
-const TYPE_PLAIN_LABELS = {
-  sos: "แจ้งเหตุด่วน (SOS)",
-  car_accident: "อุบัติเหตุรถ",
-  cardiac: "หัวใจ/หมดสติ",
-  injury: "บาดเจ็บ",
-  fire: "ไฟไหม้",
-  drowning: "จมน้ำ",
-  other: "เหตุอื่น ๆ",
-};
-
-const SEVERITY_LABELS = {
-  low: "ไม่รุนแรง",
-  medium: "ปานกลาง",
-  high: "รุนแรง",
-  critical: "วิกฤต",
-};
-
-const SEVERITY_RANK = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-};
-
-// ป้ายกำกับสถานะของเคส อิงตามฝั่ง Mobile
-const STATUS_LABELS = {
-  pending: "รอเจ้าหน้าที่รับเรื่อง",
-  accepted: "เจ้าหน้าที่รับเรื่องแล้ว",
-  on_the_way: "กำลังเดินทางไปหาคุณ",
-  arrived: "ถึงจุดเกิดเหตุแล้ว",
-  completed: "ช่วยเหลือเสร็จสิ้น",
-  cancelled: "ยกเลิกแล้ว",
-};
-
-// ตัวเลือกสถานะใน dropdown filter (หน้าประวัติแสดงเฉพาะ ทุกสถานะ, เสร็จสิ้น, ยกเลิก)
 const STATUS_FILTER_OPTIONS = [
   { value: "all", label: "ทุกสถานะ" },
-  { value: "completed", label: "ช่วยเหลือเสร็จสิ้น" },
-  { value: "cancelled", label: "ยกเลิกแล้ว" },
+  { value: "completed", label: STATUS_LABELS.completed },
+  { value: "cancelled", label: STATUS_LABELS.cancelled },
 ];
 
 const SEVERITY_FILTER_OPTIONS = [
   { value: "all", label: "ทุกระดับความรุนแรง" },
-  { value: "critical", label: "🔴 วิกฤต (Critical)" },
-  { value: "high", label: "🟠 รุนแรง (High)" },
-  { value: "medium", label: "🟡 ปานกลาง (Medium)" },
-  { value: "low", label: "🟢 ไม่รุนแรง (Low)" },
+  ...toOptions(SEVERITIES),
 ];
 
 const TYPE_FILTER_OPTIONS = [
   { value: "all", label: "ทุกประเภทเหตุฉุกเฉิน" },
-  { value: "car_accident", label: "🚗 อุบัติเหตุรถ" },
-  { value: "cardiac", label: "❤️ หัวใจ/หมดสติ" },
-  { value: "injury", label: "🩹 บาดเจ็บ" },
-  { value: "fire", label: "🔥 ไฟไหม้" },
-  { value: "drowning", label: "🌊 จมน้ำ" },
-  { value: "sos", label: "🚨 แจ้งเหตุด่วน (SOS)" },
-  { value: "other", label: "⚠️ เหตุอื่น ๆ" },
-];
-
-const SORT_OPTIONS = [
-  { value: "newest", label: "🕒 เรียงตามเวลาแจ้งล่าสุด" },
-  { value: "severity_desc", label: "🔥 ความรุนแรง: วิกฤต → ไม่รุนแรง" },
-  { value: "severity_asc", label: "🟢 ความรุนแรง: ไม่รุนแรง → วิกฤต" },
-  { value: "oldest", label: "⏳ เรียงตามเวลาแจ้งเก่าสุด" },
+  ...toOptions(INCIDENT_TYPES),
 ];
 
 const DATE_PRESETS = [
@@ -142,8 +84,8 @@ function getSearchText(item) {
     item.caseNumber,
     item.id,
     item.type,
-    TYPE_LABELS[item.type],
-    SEVERITY_LABELS[item.severity],
+    INCIDENT_TYPES[item.type]?.label,
+    SEVERITIES[item.severity]?.label,
     item.description,
     item.address,
     item.location?.address,
@@ -222,106 +164,70 @@ function exportIncidentsToCsv(
   customStart,
   customEnd,
   typeFilter = "all",
-  severityFilter = "all"
+  severityFilter = "all",
+  role = "staff"
 ) {
-  const escapeCsvCell = (val) => {
-    if (val === null || val === undefined) return '""';
-    const str = String(val).replace(/"/g, '""');
-    return `"${str}"`;
-  };
-
   const headers = [
     "ลำดับ",
-    "เลขเคส",
+    "เลขเหตุการณ์",
     "วันที่แจ้งเหตุ",
-    "เวลาแจ้งเหตุ",
-    "ประเภทเหตุฉุกเฉิน",
+    "เวลาที่แจ้งเหตุ",
+    "ประเภทเหตุ",
     "ระดับความรุนแรง",
+    "รายละเอียดเหตุ",
     "สถานะ",
-    "ชื่อผู้แจ้งเหตุ",
+    "ชื่อผู้แจ้ง",
     "เบอร์โทรผู้แจ้ง",
     "เจ้าหน้าที่ผู้รับผิดชอบ",
-    "รถปฏิบัติการ",
-    "รายละเอียดอาการ/เหตุการณ์",
-    "สถานที่เกิดเหตุ",
+    "สถานที่",
     "พิกัด (Latitude, Longitude)",
-    "เวลาเสร็จสิ้น/ยกเลิก",
-    "เวลาที่ใช้ (นาที)",
+    "พื้นที่ให้บริการ",
+    "เวลาที่ใช้ดำเนินการ (นาที)",
   ];
 
   const rows = incidents.map((item, idx) => {
     const createdMs = toMillis(item.createdAt);
-    const createdDateObj = createdMs ? new Date(createdMs) : null;
-    const dateStr = createdDateObj
-      ? createdDateObj.toLocaleDateString("th-TH")
-      : "-";
-    const timeStr = createdDateObj
-      ? createdDateObj.toLocaleTimeString("th-TH")
-      : "-";
-
-    const caseNumber =
-      item.caseNumber || `KPS-${(item.id || "").slice(0, 8).toUpperCase()}`;
-    const typeLabel = TYPE_PLAIN_LABELS[item.type] || item.type || "ไม่ระบุประเภท";
-    const severityLabel = SEVERITY_LABELS[item.severity] || "ไม่ระบุ";
-    const statusLabel = STATUS_LABELS[item.status] || item.status || "-";
-    const reporterName = item.reporter?.name || "-";
-    const reporterPhone = item.reporter?.phone ? `'${item.reporter.phone}` : "-";
-    const staffName = item.assignedTo?.name || "-";
-    const staffVehicle = item.assignedTo?.vehicle || "-";
-    const description = item.description || "-";
-    const address = item.address || item.location?.address || "ไม่ทราบตำแหน่ง";
+    const completedMs = toMillis(item.completedAt);
     const coords = getCoords(item.location);
-    const coordsStr = coords
-      ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`
-      : "-";
-    const endTime = formatDate(item.completedAt || item.cancelledAt);
-    const durationMin = getDurationMinutes(
-      item.createdAt,
-      item.completedAt || item.cancelledAt
-    );
+    const phone = item.reporter?.phone || "";
+
+    const area =
+      item.isInsideServiceArea === true ? "ในพื้นที่"
+        : item.isInsideServiceArea === false ? "นอกพื้นที่"
+          : "ไม่ทราบ";
 
     return [
-      idx + 1,
-      caseNumber,
-      dateStr,
-      timeStr,
-      typeLabel,
-      severityLabel,
-      statusLabel,
-      reporterName,
-      reporterPhone,
-      staffName,
-      staffVehicle,
-      description,
-      address,
-      coordsStr,
-      endTime,
-      durationMin !== null ? durationMin : "-",
-    ]
-      .map(escapeCsvCell)
-      .join(",");
+      csvCell(idx + 1),
+      csvCell(item.caseNumber || `KPS-${(item.id || "").slice(0, 8).toUpperCase()}`),
+      csvCell(isoDate(createdMs)),
+      csvCell(isoTime(createdMs)),
+      csvCell(INCIDENT_TYPES[item.type]?.label || item.type || "ไม่ระบุประเภท"),
+      csvCell(SEVERITIES[item.severity]?.label || "ไม่ระบุ"),
+      csvCell(item.description || ""),
+      csvCell(STATUS_LABELS[item.status] || item.status || ""),
+      csvCell(item.reporter?.name || ""),
+      // Admin เห็นเบอร์เต็ม, Staff เห็นแบบ mask ; asText คงเลข 0 นำหน้า
+      csvCell(role === "admin" ? phone : maskPhone(phone), { asText: true }),
+      csvCell(item.assignedTo?.name || ""),
+      csvCell(item.address || item.location?.address || "ไม่ทราบตำแหน่ง"),
+      csvCell(coords ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}` : ""),
+      csvCell(area),
+      // เฉพาะเคสเสร็จสิ้น (นิยามเดียวกับหน้าสถิติ) ; เคสยกเลิกเว้นว่าง
+      csvCell(item.status === "completed" ? round1(diffMin(createdMs, completedMs)) : null),
+    ];
   });
 
-  const csvContent = "\uFEFF" + [headers.map(escapeCsvCell).join(","), ...rows].join("\r\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-
-  const todayIso = new Date().toISOString().slice(0, 10);
   const rangeSuffix =
     datePreset === "custom" && (customStart || customEnd)
       ? `${customStart || "start"}_to_${customEnd || "end"}`
       : datePreset;
   const typeSuffix = typeFilter !== "all" ? `_${typeFilter}` : "";
   const sevSuffix = severityFilter !== "all" ? `_${severityFilter}` : "";
-  const filename = `KPS_Emergency_Report_${rangeSuffix}${typeSuffix}${sevSuffix}_${todayIso}.csv`;
 
-  const link = document.createElement("a");
-  link.href = url;
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadCsv(
+    `KPS_Emergency_Report_${rangeSuffix}${typeSuffix}${sevSuffix}_${isoDate(Date.now())}.csv`,
+    rowsToCsv([headers.map((h) => csvCell(h)), ...rows])
+  );
 }
 
 // ป้ายสถานะขนาดเล็กที่ใช้ซ้ำทั้ง archived/status
@@ -390,18 +296,16 @@ function IncidentTimeline({ timeline }) {
           <div key={log.id || `${status}-${index}`} className="flex gap-3">
             <div className="flex flex-col items-center">
               <div
-                className={`w-2.5 h-2.5 rounded-full mt-1 ${
-                  isLast ? "bg-red-500 ring-4 ring-red-50" : "bg-slate-300"
-                }`}
+                className={`w-2.5 h-2.5 rounded-full mt-1 ${isLast ? "bg-red-500 ring-4 ring-red-50" : "bg-slate-300"
+                  }`}
               />
               {!isLast && <div className="w-0.5 h-full bg-slate-200 my-1" />}
             </div>
 
             <div className="flex-1 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
               <span
-                className={`text-[13px] ${
-                  isLast ? "font-bold text-slate-800" : "font-semibold text-slate-500"
-                }`}
+                className={`text-[13px] ${isLast ? "font-bold text-slate-800" : "font-semibold text-slate-500"
+                  }`}
               >
                 {log.note || log.label || STATUS_LABELS[status] || status}
               </span>
@@ -443,7 +347,7 @@ function IncidentLocation({ item, onPreviewMap }) {
             onClick={() => onPreviewMap({ ...coords, address })}
             className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-all shadow-sm"
           >
-            <span>🗺️</span> แผนที่
+            แผนที่
           </button>
         )}
       </div>
@@ -530,10 +434,10 @@ function IncidentHistoryCard({
     item.severity === "critical"
       ? "red"
       : item.severity === "high"
-      ? "orange"
-      : item.severity === "medium"
-      ? "amber"
-      : "emerald";
+        ? "orange"
+        : item.severity === "medium"
+          ? "amber"
+          : "emerald";
 
   return (
     <>
@@ -542,14 +446,14 @@ function IncidentHistoryCard({
           <div className="flex-1">
             <div className="flex items-center gap-2 flex-wrap mb-2">
               <h3 className="font-bold text-slate-800 text-lg">
-                {TYPE_LABELS[item.type] || item.type || "ไม่ระบุประเภท"}
+                {INCIDENT_TYPES[item.type]?.label || item.type || "ไม่ระบุประเภท"}
               </h3>
               <StatusBadge tone={isCancelled ? "slate" : "emerald"}>
                 {STATUS_LABELS[status] || status}
               </StatusBadge>
-              {item.severity && SEVERITY_LABELS[item.severity] && (
+              {item.severity && SEVERITIES[item.severity] && (
                 <StatusBadge tone={severityTone}>
-                  ความรุนแรง: {SEVERITY_LABELS[item.severity]}
+                  ความรุนแรง: {SEVERITIES[item.severity].label}
                 </StatusBadge>
               )}
               {item.archived && <StatusBadge tone="amber">เก็บประวัติแล้ว</StatusBadge>}
@@ -564,7 +468,7 @@ function IncidentHistoryCard({
                 {(item.reporter || reporterUid) && (
                   <span className="flex items-center gap-2 flex-wrap">
                     <span>
-                      👤 ผู้แจ้ง: <strong>{item.reporter?.name || "-"}</strong>{" "}
+                      ผู้แจ้ง: <strong>{item.reporter?.name || "-"}</strong>{" "}
                       {item.reporter?.phone ? `(${item.reporter.phone})` : ""}
                     </span>
                     <button
@@ -572,13 +476,13 @@ function IncidentHistoryCard({
                       onClick={() => setShowReporterModal(true)}
                       className="text-[11px] font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-lg shadow-sm transition flex items-center gap-1"
                     >
-                      <span>🪪</span> ดูข้อมูลผู้แจ้ง
+                      ดูข้อมูลผู้แจ้ง
                     </button>
                   </span>
                 )}
                 {item.assignedTo && (
                   <span>
-                    🚑 เจ้าหน้าที่: <strong>{item.assignedTo.name || "-"}</strong>
+                    เจ้าหน้าที่: <strong>{item.assignedTo.name || "-"}</strong>
                     {item.assignedTo.vehicle ? ` (${item.assignedTo.vehicle})` : ""}
                   </span>
                 )}
@@ -660,7 +564,7 @@ function HistoryToolbar({
             </span>
           </h2>
           <p className="text-sm font-medium text-slate-500 mt-1">
-            เลือกกรองช่วงเวลา ประเภทเหตุฉุกเฉิน และระดับความรุนแรง เพื่อดูข้อมูลหรือส่งออกรายงาน CSV เฉพาะเรื่อง
+            เลือกช่วงเวลา ประเภทเหตุฉุกเฉิน และระดับความรุนแรง เพื่อดูข้อมูลหรือสร้างรายงาน CSV
           </p>
         </div>
 
@@ -671,7 +575,7 @@ function HistoryToolbar({
             disabled={resultCount === 0}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
           >
-            <span>📥</span> ส่งออกรายงาน CSV ({resultCount} เคส)
+            สร้างรายงาน CSV ({resultCount} เคส)
           </button>
 
           {role === "admin" && resultCount > 0 && (
@@ -680,7 +584,7 @@ function HistoryToolbar({
               onClick={onBulkDelete}
               className="flex items-center gap-2 bg-red-50 border border-red-100 text-red-600 hover:bg-red-500 hover:text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
             >
-              <span>🗑️</span> ลบที่แสดง ({resultCount})
+              ลบที่แสดง ({resultCount})
             </button>
           )}
         </div>
@@ -690,7 +594,7 @@ function HistoryToolbar({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-50/80 p-3 rounded-2xl border border-slate-200/80">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs font-bold text-slate-500 mr-1 flex items-center gap-1">
-            📅 ช่วงเวลา:
+            ช่วงเวลา:
           </span>
           {DATE_PRESETS.map((preset) => {
             const active = datePreset === preset.value;
@@ -699,11 +603,10 @@ function HistoryToolbar({
                 key={preset.value}
                 type="button"
                 onClick={() => onDatePresetChange(preset.value)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  active
-                    ? "bg-red-500 text-white shadow-sm"
-                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
-                }`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${active
+                  ? "bg-red-500 text-white shadow-sm"
+                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                  }`}
               >
                 {preset.label}
               </button>
@@ -739,7 +642,7 @@ function HistoryToolbar({
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-bold text-slate-500 px-1">
-            🔍 ค้นหาข้อความ
+            ค้นหาข้อความ
           </label>
           <input
             className={CONTROL_CLASS}
@@ -751,7 +654,7 @@ function HistoryToolbar({
 
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-bold text-slate-500 px-1">
-            🚨 ประเภทเหตุฉุกเฉิน
+            ประเภทเหตุฉุกเฉิน
           </label>
           <select
             className={CONTROL_CLASS}
@@ -768,7 +671,7 @@ function HistoryToolbar({
 
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-bold text-slate-500 px-1">
-            ⚠️ ระดับความรุนแรง
+            ระดับความรุนแรง
           </label>
           <select
             className={CONTROL_CLASS}
@@ -785,7 +688,7 @@ function HistoryToolbar({
 
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-bold text-slate-500 px-1">
-            📌 สถานะการดำเนินงาน
+            สถานะการดำเนินงาน
           </label>
           <select
             className={CONTROL_CLASS}
@@ -802,7 +705,7 @@ function HistoryToolbar({
 
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-bold text-slate-500 px-1">
-            ↕️ เรียงลำดับเคส
+            เรียงลำดับเคส
           </label>
           <select
             className={CONTROL_CLASS}
@@ -875,7 +778,7 @@ function MapPreviewModal({ location, onClose, isLoaded }) {
       >
         <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-white">
           <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-            <span className="text-red-500">📍</span> ตำแหน่งจุดเกิดเหตุ
+            ตำแหน่งจุดเกิดเหตุ
           </h3>
           <button
             type="button"
@@ -958,25 +861,7 @@ export default function HistoryPage({ incidents = [], onRestore, onDelete, role 
       );
     });
 
-    return [...filtered].sort((a, b) => {
-      const rankA = SEVERITY_RANK[a.severity] || 0;
-      const rankB = SEVERITY_RANK[b.severity] || 0;
-      const timeA = toMillis(a.createdAt) || 0;
-      const timeB = toMillis(b.createdAt) || 0;
-
-      if (sortBy === "severity_desc") {
-        if (rankB !== rankA) return rankB - rankA;
-        return timeB - timeA;
-      }
-      if (sortBy === "severity_asc") {
-        if (rankA !== rankB) return rankA - rankB;
-        return timeB - timeA;
-      }
-      if (sortBy === "oldest") {
-        return timeA - timeB;
-      }
-      return timeB - timeA;
-    });
+    return sortIncidents(filtered, sortBy);
   }, [
     incidents,
     search,
@@ -997,14 +882,15 @@ export default function HistoryPage({ incidents = [], onRestore, onDelete, role 
       customStartDate,
       customEndDate,
       typeFilter,
-      severityFilter
+      severityFilter,
+      role
     );
   };
 
   // ลบรายการที่กำลังแสดงทั้งหมด โดยถามยืนยันก่อนเพื่อกันการลบถาวรโดยไม่ตั้งใจ
   const handleBulkDelete = () => {
     const ok = window.confirm(
-      `🚨 คำเตือน: คุณต้องการลบประวัติที่แสดงอยู่นี้ทั้งหมด (${filteredIncidents.length} รายการ) ใช่หรือไม่?\nข้อมูลจะถูกลบออกจากฐานข้อมูลถาวร และไม่สามารถกู้คืนได้`
+      `คำเตือน: คุณต้องการลบประวัติที่แสดงอยู่นี้ทั้งหมด (${filteredIncidents.length} รายการ) ใช่หรือไม่?\nข้อมูลจะถูกลบออกจากฐานข้อมูลถาวร และไม่สามารถกู้คืนได้`
     );
 
     if (ok) {

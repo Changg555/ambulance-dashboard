@@ -232,10 +232,10 @@ export default function AEDManager() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            ⚡ จัดการตำแหน่งเครื่องกระตุกหัวใจไฟฟ้า (AED)
+            จัดการตำแหน่งเครื่องกระตุกหัวใจไฟฟ้า (AED)
           </h1>
           <p className="text-xs font-medium text-slate-500 mt-1">
-            เพิ่ม แก้ไข และตรวจสอบจุดติดตั้งเครื่อง AED ทั่วบริเวณมหาวิทยาลัยเกษตรศาสตร์ กำแพงแสน
+            เพิ่ม แก้ไข และตรวจสอบจุดติดตั้งเครื่อง AED ทั้งหมด
           </p>
         </div>
 
@@ -264,7 +264,7 @@ export default function AEDManager() {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                {editingId ? "✏️ แก้ไขข้อมูลจุดติดตั้ง AED" : "➕ เพิ่มจุดติดตั้ง AED ใหม่"}
+                {editingId ? "แก้ไขข้อมูลจุดติดตั้ง AED" : "เพิ่มจุดติดตั้ง AED ใหม่"}
               </h2>
               {editingId && (
                 <button
@@ -354,7 +354,7 @@ export default function AEDManager() {
                         : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
                     }`}
                   >
-                    <span>✅</span> พร้อมใช้งาน
+                    พร้อมใช้งาน
                   </button>
                   <button
                     type="button"
@@ -365,7 +365,7 @@ export default function AEDManager() {
                         : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
                     }`}
                   >
-                    <span>⚠️</span> ปิดซ่อมบำรุง
+                    ปิดซ่อมบำรุง
                   </button>
                 </div>
               </div>
@@ -379,8 +379,8 @@ export default function AEDManager() {
                 {saving
                   ? "กำลังบันทึกข้อมูล..."
                   : editingId
-                  ? "💾 บันทึกการแก้ไขจุดติดตั้ง"
-                  : "➕ บันทึกจุดติดตั้ง AED ใหม่"}
+                  ? "บันทึกการแก้ไขจุดติดตั้ง"
+                  : "บันทึกจุดติดตั้ง AED ใหม่"}
               </button>
             </form>
           </div>
@@ -389,7 +389,7 @@ export default function AEDManager() {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
               <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                📋 รายการจุดติดตั้ง AED ({filteredAedList.length})
+                รายการจุดติดตั้ง AED ({filteredAedList.length})
               </h3>
 
               {/* ปุ่มสลับฟิลเตอร์สถานะ */}
@@ -428,7 +428,7 @@ export default function AEDManager() {
             <div className="mb-3">
               <input
                 type="text"
-                placeholder="🔍 ค้นหาชื่ออาคาร หรือตำแหน่งติดตั้ง..."
+                placeholder="ค้นหาชื่ออาคาร หรือตำแหน่งติดตั้ง..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:border-red-500"
@@ -476,7 +476,7 @@ export default function AEDManager() {
 
                           {item.description && (
                             <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">
-                              📍 {item.description}
+                              {item.description}
                             </p>
                           )}
 
@@ -533,7 +533,7 @@ export default function AEDManager() {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
             <div className="mb-3">
               <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                🗺️ แผนที่พิกัดจุดติดตั้ง AED
+                แผนที่พิกัดจุดติดตั้ง AED
               </h2>
               <p className="text-xs text-slate-500">
                 คลิกที่จุดใดก็ได้บนแผนที่เพื่อปักหมุดพิกัด หรือคลิกที่หมุดเพื่อดูรายละเอียด
@@ -623,7 +623,7 @@ export default function AEDManager() {
                             onClick={() => handleEdit(selectedMapAed)}
                             className="text-[11px] font-bold text-blue-600 hover:underline"
                           >
-                            ✏️ แก้ไขจุดนี้
+                            แก้ไขจุดนี้
                           </button>
                         </div>
                       </div>
