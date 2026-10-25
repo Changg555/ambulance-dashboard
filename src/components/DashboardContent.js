@@ -130,7 +130,7 @@ export default function DashboardContent({ user, profile, role }) {
   // เก็บ ID เคสที่เจ้าหน้าที่กด "รับทราบเคส" แล้ว เพื่อปิดป๊อปอัปและหยุดเสียงเตือน
   const [acknowledgedIds, setAcknowledgedIds] = useState(() => new Set());
 
-  // รายการเคส pending ที่ยังไม่ได้รับทราบ เพื่อแสดงป๊อปอัปแจ้งเตือนพร้อมเสียงเตือน
+  // รายการ pending ที่ยังไม่ได้รับทราบ เพื่อแสดงป๊อปอัปแจ้งเตือนพร้อมเสียงเตือน
   const unacknowledgedPendingIncidents = useMemo(
     () =>
       activeIncidents.filter(
@@ -149,7 +149,7 @@ export default function DashboardContent({ user, profile, role }) {
     setTab("incidents");
   };
 
-  // ป้องกัน User ทั่วไปเข้าถึง Tab ของ Admin
+  // ป้องกัน User ทั่วไปเข้าถึง Tabของ  Admin
   useEffect(() => {
     if (role !== "admin" && (tab === "aed" || tab === "service_area" || tab === "users")) {
       setTab("incidents");
