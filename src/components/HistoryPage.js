@@ -4,6 +4,8 @@ import { toMillis } from "../hooks/useIncidents";
 import ReporterDetailModal from "./ReporterDetailModal";
 import { INCIDENT_TYPES, SEVERITIES, STATUS_LABELS, SORT_OPTIONS, toOptions } from "../constants/incident";
 import { sortIncidents } from "../utils/sortIncidents";
+import { csvCell, rowsToCsv, downloadCsv, isoDate, isoTime, maskPhone } from "../utils/csv";
+import { diffMin, round1 } from "../utils/analyticsStats";
 
 const STATUS_FILTER_OPTIONS = [
   { value: "all", label: "ทุกสถานะ" },
@@ -162,106 +164,70 @@ function exportIncidentsToCsv(
   customStart,
   customEnd,
   typeFilter = "all",
-  severityFilter = "all"
+  severityFilter = "all",
+  role = "staff"
 ) {
-  const escapeCsvCell = (val) => {
-    if (val === null || val === undefined) return '""';
-    const str = String(val).replace(/"/g, '""');
-    return `"${str}"`;
-  };
-
   const headers = [
     "ลำดับ",
-    "เลขเคส",
+    "เลขเหตุการณ์",
     "วันที่แจ้งเหตุ",
-    "เวลาแจ้งเหตุ",
-    "ประเภทเหตุฉุกเฉิน",
+    "เวลาที่แจ้งเหตุ",
+    "ประเภทเหตุ",
     "ระดับความรุนแรง",
+    "รายละเอียดเหตุ",
     "สถานะ",
-    "ชื่อผู้แจ้งเหตุ",
+    "ชื่อผู้แจ้ง",
     "เบอร์โทรผู้แจ้ง",
     "เจ้าหน้าที่ผู้รับผิดชอบ",
-    "รถปฏิบัติการ",
-    "รายละเอียดอาการ/เหตุการณ์",
-    "สถานที่เกิดเหตุ",
+    "สถานที่",
     "พิกัด (Latitude, Longitude)",
-    "เวลาเสร็จสิ้น/ยกเลิก",
-    "เวลาที่ใช้ (นาที)",
+    "พื้นที่ให้บริการ",
+    "เวลาที่ใช้ดำเนินการ (นาที)",
   ];
 
   const rows = incidents.map((item, idx) => {
     const createdMs = toMillis(item.createdAt);
-    const createdDateObj = createdMs ? new Date(createdMs) : null;
-    const dateStr = createdDateObj
-      ? createdDateObj.toLocaleDateString("th-TH")
-      : "-";
-    const timeStr = createdDateObj
-      ? createdDateObj.toLocaleTimeString("th-TH")
-      : "-";
-
-    const caseNumber =
-      item.caseNumber || `KPS-${(item.id || "").slice(0, 8).toUpperCase()}`;
-    const typeLabel = INCIDENT_TYPES[item.type]?.label || item.type || "ไม่ระบุประเภท";
-    const severityLabel = SEVERITIES[item.severity]?.label || "ไม่ระบุ";
-    const statusLabel = STATUS_LABELS[item.status] || item.status || "-";
-    const reporterName = item.reporter?.name || "-";
-    const reporterPhone = item.reporter?.phone ? `'${item.reporter.phone}` : "-";
-    const staffName = item.assignedTo?.name || "-";
-    const staffVehicle = item.assignedTo?.vehicle || "-";
-    const description = item.description || "-";
-    const address = item.address || item.location?.address || "ไม่ทราบตำแหน่ง";
+    const completedMs = toMillis(item.completedAt);
     const coords = getCoords(item.location);
-    const coordsStr = coords
-      ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`
-      : "-";
-    const endTime = formatDate(item.completedAt || item.cancelledAt);
-    const durationMin = getDurationMinutes(
-      item.createdAt,
-      item.completedAt || item.cancelledAt
-    );
+    const phone = item.reporter?.phone || "";
+
+    const area =
+      item.isInsideServiceArea === true ? "ในพื้นที่"
+        : item.isInsideServiceArea === false ? "นอกพื้นที่"
+          : "ไม่ทราบ";
 
     return [
-      idx + 1,
-      caseNumber,
-      dateStr,
-      timeStr,
-      typeLabel,
-      severityLabel,
-      statusLabel,
-      reporterName,
-      reporterPhone,
-      staffName,
-      staffVehicle,
-      description,
-      address,
-      coordsStr,
-      endTime,
-      durationMin !== null ? durationMin : "-",
-    ]
-      .map(escapeCsvCell)
-      .join(",");
+      csvCell(idx + 1),
+      csvCell(item.caseNumber || `KPS-${(item.id || "").slice(0, 8).toUpperCase()}`),
+      csvCell(isoDate(createdMs)),
+      csvCell(isoTime(createdMs)),
+      csvCell(INCIDENT_TYPES[item.type]?.label || item.type || "ไม่ระบุประเภท"),
+      csvCell(SEVERITIES[item.severity]?.label || "ไม่ระบุ"),
+      csvCell(item.description || ""),
+      csvCell(STATUS_LABELS[item.status] || item.status || ""),
+      csvCell(item.reporter?.name || ""),
+      // Admin เห็นเบอร์เต็ม, Staff เห็นแบบ mask ; asText คงเลข 0 นำหน้า
+      csvCell(role === "admin" ? phone : maskPhone(phone), { asText: true }),
+      csvCell(item.assignedTo?.name || ""),
+      csvCell(item.address || item.location?.address || "ไม่ทราบตำแหน่ง"),
+      csvCell(coords ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}` : ""),
+      csvCell(area),
+      // เฉพาะเคสเสร็จสิ้น (นิยามเดียวกับหน้าสถิติ) ; เคสยกเลิกเว้นว่าง
+      csvCell(item.status === "completed" ? round1(diffMin(createdMs, completedMs)) : null),
+    ];
   });
 
-  const csvContent = "\uFEFF" + [headers.map(escapeCsvCell).join(","), ...rows].join("\r\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-
-  const todayIso = new Date().toISOString().slice(0, 10);
   const rangeSuffix =
     datePreset === "custom" && (customStart || customEnd)
       ? `${customStart || "start"}_to_${customEnd || "end"}`
       : datePreset;
   const typeSuffix = typeFilter !== "all" ? `_${typeFilter}` : "";
   const sevSuffix = severityFilter !== "all" ? `_${severityFilter}` : "";
-  const filename = `KPS_Emergency_Report_${rangeSuffix}${typeSuffix}${sevSuffix}_${todayIso}.csv`;
 
-  const link = document.createElement("a");
-  link.href = url;
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadCsv(
+    `KPS_Emergency_Report_${rangeSuffix}${typeSuffix}${sevSuffix}_${isoDate(Date.now())}.csv`,
+    rowsToCsv([headers.map((h) => csvCell(h)), ...rows])
+  );
 }
 
 // ป้ายสถานะขนาดเล็กที่ใช้ซ้ำทั้ง archived/status
@@ -638,8 +604,8 @@ function HistoryToolbar({
                 type="button"
                 onClick={() => onDatePresetChange(preset.value)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${active
-                    ? "bg-red-500 text-white shadow-sm"
-                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                  ? "bg-red-500 text-white shadow-sm"
+                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
                   }`}
               >
                 {preset.label}
@@ -916,7 +882,8 @@ export default function HistoryPage({ incidents = [], onRestore, onDelete, role 
       customStartDate,
       customEndDate,
       typeFilter,
-      severityFilter
+      severityFilter,
+      role
     );
   };
 
