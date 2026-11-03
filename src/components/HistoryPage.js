@@ -6,6 +6,9 @@ import { INCIDENT_TYPES, SEVERITIES, STATUS_LABELS, SORT_OPTIONS, toOptions } fr
 import { sortIncidents } from "../utils/sortIncidents";
 import { csvCell, rowsToCsv, downloadCsv, isoDate, isoTime, maskPhone } from "../utils/csv";
 import { diffMin, round1 } from "../utils/analyticsStats";
+import { formatMinutes } from "../utils/formatDuration";
+import { getDataDateRange, getExportDateTime } from "../utils/dataRange";
+import { DATE_PRESETS, isWithinDateRange } from "../utils/dateFilter";
 
 const STATUS_FILTER_OPTIONS = [
   { value: "all", label: "ทุกสถานะ" },
@@ -21,14 +24,6 @@ const SEVERITY_FILTER_OPTIONS = [
 const TYPE_FILTER_OPTIONS = [
   { value: "all", label: "ทุกประเภทเหตุฉุกเฉิน" },
   ...toOptions(INCIDENT_TYPES),
-];
-
-const DATE_PRESETS = [
-  { value: "all", label: "ทั้งหมด" },
-  { value: "today", label: "วันนี้" },
-  { value: "week", label: "สัปดาห์นี้" },
-  { value: "month", label: "เดือนนี้" },
-  { value: "custom", label: "กำหนดช่วงวันที่เอง" },
 ];
 
 // class กลางของ input/select เพื่อไม่ต้องเขียนซ้ำหลายจุด
@@ -51,13 +46,7 @@ function getDurationMinutes(start, end) {
 
 // คำนวณเวลาที่ใช้ตั้งแต่เปิดเคสจนถึงปิดหรือยกเลิกเคส
 function getDuration(start, end) {
-  const minutes = getDurationMinutes(start, end);
-  if (minutes === null) return "-";
-  if (minutes < 60) return `${minutes} นาที`;
-
-  const hours = Math.floor(minutes / 60);
-  const remainMinutes = minutes % 60;
-  return `${hours} ชม. ${remainMinutes} นาที`;
+  return formatMinutes(getDurationMinutes(start, end));
 }
 
 // รวมรูปจากฝั่ง Mobile ({ url, publicId }) และ schema เดิมให้เป็น array ของ URL
@@ -98,65 +87,6 @@ function getSearchText(item) {
     .toLowerCase();
 }
 
-// ตรวจสอบว่าเวลาของเคสอยู่ในช่วงเวลาที่เลือกหรือไม่
-function isWithinDateRange(createdAtMs, datePreset, customStart, customEnd) {
-  if (datePreset === "all") return true;
-  if (!createdAtMs) return false;
-
-  const now = new Date();
-
-  if (datePreset === "today") {
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const endOfToday = startOfToday + 24 * 60 * 60 * 1000 - 1;
-    return createdAtMs >= startOfToday && createdAtMs <= endOfToday;
-  }
-
-  if (datePreset === "week") {
-    const dayOfWeek = now.getDay(); // 0 (Sun) - 6 (Sat)
-    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const startOfWeek = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() - diffToMonday
-    ).getTime();
-    const endOfToday =
-      new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() +
-      24 * 60 * 60 * 1000 -
-      1;
-    return createdAtMs >= startOfWeek && createdAtMs <= endOfToday;
-  }
-
-  if (datePreset === "month") {
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const endOfMonth = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0,
-      23,
-      59,
-      59,
-      999
-    ).getTime();
-    return createdAtMs >= startOfMonth && createdAtMs <= endOfMonth;
-  }
-
-  if (datePreset === "custom") {
-    let minMs = -Infinity;
-    let maxMs = Infinity;
-    if (customStart) {
-      const [y, m, d] = customStart.split("-").map(Number);
-      minMs = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-    }
-    if (customEnd) {
-      const [y, m, d] = customEnd.split("-").map(Number);
-      maxMs = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
-    }
-    return createdAtMs >= minMs && createdAtMs <= maxMs;
-  }
-
-  return true;
-}
-
 // ฟังก์ชันแปลงข้อมูลเคสเป็น CSV (รองรับภาษาไทยใน Excel ด้วย UTF-8 BOM)
 function exportIncidentsToCsv(
   incidents,
@@ -172,6 +102,7 @@ function exportIncidentsToCsv(
     "เลขเหตุการณ์",
     "วันที่แจ้งเหตุ",
     "เวลาที่แจ้งเหตุ",
+    "วันที่เสร็จสิ้น/ยกเลิก",
     "ประเภทเหตุ",
     "ระดับความรุนแรง",
     "รายละเอียดเหตุ",
@@ -201,6 +132,7 @@ function exportIncidentsToCsv(
       csvCell(item.caseNumber || `KPS-${(item.id || "").slice(0, 8).toUpperCase()}`),
       csvCell(isoDate(createdMs)),
       csvCell(isoTime(createdMs)),
+      csvCell(isoDate(completedMs || toMillis(item.cancelledAt))),
       csvCell(INCIDENT_TYPES[item.type]?.label || item.type || "ไม่ระบุประเภท"),
       csvCell(SEVERITIES[item.severity]?.label || "ไม่ระบุ"),
       csvCell(item.description || ""),
@@ -224,9 +156,18 @@ function exportIncidentsToCsv(
   const typeSuffix = typeFilter !== "all" ? `_${typeFilter}` : "";
   const sevSuffix = severityFilter !== "all" ? `_${severityFilter}` : "";
 
+  // หัวรายงาน (อยู่เหนือตาราง)
+  const metaRows = [
+    [csvCell("รายงานประวัติการแจ้งเหตุฉุกเฉิน (KPS Case Logs)")],
+    [csvCell("วันที่ส่งออกรายงาน"), csvCell(getExportDateTime())],
+    [csvCell("ช่วงวันที่ของข้อมูล"), csvCell(getDataDateRange(incidents))],
+    [csvCell("จำนวนเหตุฉุกเฉิน"), csvCell(incidents.length)],
+    [], // บรรทัดว่างคั่นระหว่างหัวรายงานกับตาราง
+  ];
+
   downloadCsv(
     `KPS_Emergency_Report_${rangeSuffix}${typeSuffix}${sevSuffix}_${isoDate(Date.now())}.csv`,
-    rowsToCsv([headers.map((h) => csvCell(h)), ...rows])
+    rowsToCsv([...metaRows, headers.map((h) => csvCell(h)), ...rows])
   );
 }
 

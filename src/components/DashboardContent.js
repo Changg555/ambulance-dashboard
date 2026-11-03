@@ -164,12 +164,12 @@ export default function DashboardContent({ user, profile, role }) {
           <div className="flex flex-col flex-1 overflow-hidden">
             {permissionError && (
               <div className="mx-4 mt-4 bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded-xl text-xs font-medium">
-                ⚠️ <strong>Firestore Security Rules บล็อกการดึงเคสทั้งหมด ({permissionError})</strong>:{" "}
+                <strong>Firestore Security Rules บล็อกการดึงเคสทั้งหมด ({permissionError})</strong>:{" "}
                 กรุณาอัปเดต Rules ใน Firebase Console (โปรเจกต์ <code>kps-ambulance-5308f</code> &gt; Firestore Database &gt; Rules) ให้เจ้าหน้าที่ (<code>staff</code> / <code>admin</code>) มีสิทธิ์อ่านและแก้ไขคอลเลกชัน <code>incidents</code> ทั้งหมด
               </div>
             )}
 
-            <StatsBar stats={stats} />
+            <StatsBar incidents={incidents} />
             <div className="flex flex-1 overflow-hidden gap-4 p-4">
               {/* รายการเหตุการณ์ด้านซ้าย */}
               <div className="w-[460px] flex flex-col gap-3 overflow-hidden">
