@@ -108,7 +108,7 @@ export default function StatsBar({ incidents = [] }) {
           {/* บรรทัดแรก: ข้อความ + Dropdown */}
           <div className="flex items-center gap-2 min-w-0">
             <p className="text-sm font-medium text-slate-500 whitespace-nowrap">
-              สรุปเหตุฉุกเฉินช่วง
+              สรุปจำนวนเหตุฉุกเฉิน
             </p>
 
             <select

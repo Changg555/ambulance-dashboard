@@ -111,7 +111,7 @@ export default function DashboardContent({ user, profile, role }) {
   const [severityFilter, setSeverityFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [sortBy, setSortBy] = useState("severity_desc");
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilterCount =
     (severityFilter !== "all" ? 1 : 0) + (typeFilter !== "all" ? 1 : 0);
 
