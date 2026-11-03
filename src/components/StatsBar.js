@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { toMillis } from "../hooks/useIncidents";
 import { DATE_PRESETS, isWithinDateRange } from "../utils/dateFilter";
+import usePersistedState from "../hooks/usePersistedState";
 
 const STAT_ITEMS = [
   {
@@ -61,10 +62,9 @@ function countStats(list) {
 }
 
 export default function StatsBar({ incidents = [] }) {
-  const [datePreset, setDatePreset] = useState("all");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
-
+  const [datePreset, setDatePreset] = usePersistedState("statsBar.datePreset", "all");
+  const [customStart, setCustomStart] = usePersistedState("statsBar.customStart", "");
+  const [customEnd, setCustomEnd] = usePersistedState("statsBar.customEnd", "");
   const stats = useMemo(() => {
     const filtered = incidents.filter((item) =>
       isWithinDateRange(
