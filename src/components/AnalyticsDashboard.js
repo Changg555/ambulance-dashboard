@@ -507,7 +507,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
       if (severityFilter !== "all" && item.severity !== severityFilter) {
         return false;
       }
-
+ 
       return true;
     });
   }, [
