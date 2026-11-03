@@ -363,7 +363,7 @@ export default function EmergencyAlertModal({
           {/* รายละเอียดอาการ / เหตุการณ์ */}
           <div className="bg-red-50/70 border border-red-200/80 rounded-2xl p-4">
             <span className="text-xs font-bold text-red-800 block mb-1">
-              รายละเอียดอาการ / สิ่งที่เกิดขึ้น:
+              📋 รายละเอียดอาการ / สิ่งที่เกิดขึ้น:
             </span>
             <p className="text-base font-bold text-slate-800 leading-relaxed whitespace-pre-wrap">
               {currentIncident.description || "ไม่ได้ระบุรายละเอียดอาการ"}
@@ -391,7 +391,7 @@ export default function EmergencyAlertModal({
                 href={`tel:${currentIncident.reporter.phone}`}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-1.5"
               >
-                โทร: {currentIncident.reporter.phone}
+                <span>📞</span> โทร: {currentIncident.reporter.phone}
               </a>
             )}
           </div>
@@ -404,6 +404,7 @@ export default function EmergencyAlertModal({
             onClick={handleAcknowledge}
             className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-700 hover:to-red-700 text-white font-black text-base shadow-lg shadow-red-500/30 transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2.5 animate-pulse"
           >
+            <span className="text-xl">✅</span>
             <span>รับทราบเคส</span>
           </button>
         </div>

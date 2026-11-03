@@ -26,8 +26,8 @@ const TabButton = ({ active, onClick, children }) => (
   <button
     onClick={onClick}
     className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 ${active
-      ? "bg-white text-red-600 shadow-sm scale-105"
-      : "bg-transparent text-red-50 hover:bg-white/10"
+        ? "bg-white text-red-600 shadow-sm scale-105"
+        : "bg-transparent text-red-50 hover:bg-white/10"
       }`}
   >
     {children}
@@ -111,9 +111,6 @@ export default function DashboardContent({ user, profile, role }) {
   const [severityFilter, setSeverityFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [sortBy, setSortBy] = useState("severity_desc");
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const activeFilterCount =
-    (severityFilter !== "all" ? 1 : 0) + (typeFilter !== "all" ? 1 : 0);
 
   const displayedActiveIncidents = useMemo(() => {
     const filtered = activeIncidents.filter((item) => {
@@ -167,111 +164,76 @@ export default function DashboardContent({ user, profile, role }) {
           <div className="flex flex-col flex-1 overflow-hidden">
             {permissionError && (
               <div className="mx-4 mt-4 bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded-xl text-xs font-medium">
-                <strong>Firestore Security Rules บล็อกการดึงเคสทั้งหมด ({permissionError})</strong>:{" "}
+                ⚠️ <strong>Firestore Security Rules บล็อกการดึงเคสทั้งหมด ({permissionError})</strong>:{" "}
                 กรุณาอัปเดต Rules ใน Firebase Console (โปรเจกต์ <code>kps-ambulance-5308f</code> &gt; Firestore Database &gt; Rules) ให้เจ้าหน้าที่ (<code>staff</code> / <code>admin</code>) มีสิทธิ์อ่านและแก้ไขคอลเลกชัน <code>incidents</code> ทั้งหมด
               </div>
             )}
 
-            <StatsBar incidents={incidents} />
+            <StatsBar stats={stats} />
             <div className="flex flex-1 overflow-hidden gap-4 p-4">
               {/* รายการเหตุการณ์ด้านซ้าย */}
               <div className="w-[460px] flex flex-col gap-3 overflow-hidden">
                 {/* แถบตัวกรองและเรียงลำดับเคสตามความรุนแรงและประเภทเหตุสำหรับเจ้าหน้าที่ */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm flex flex-col gap-2 shrink-0">
-                  {/* หัวข้อรายการ + ล้างตัวกรอง */}
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-600">
                       รายการเหตุฉุกเฉินที่กำลังดำเนินการ ({displayedActiveIncidents.length})
                     </span>
-                    {activeFilterCount > 0 && (
+                    {(severityFilter !== "all" || typeFilter !== "all") && (
                       <button
                         type="button"
                         onClick={() => {
                           setSeverityFilter("all");
                           setTypeFilter("all");
                         }}
-                        className="shrink-0 text-[11px] font-bold text-red-500 hover:underline"
+                        className="text-[11px] font-bold text-red-500 hover:underline"
                       >
                         ล้างตัวกรอง
                       </button>
                     )}
                   </div>
-
-                  {/* ปุ่มย่อ/ขยายแถบตัวกรอง */}
-                  <button
-                    type="button"
-                    onClick={() => setFiltersOpen((v) => !v)}
-                    aria-expanded={filtersOpen}
-                    aria-controls="incident-filter-panel"
-                    className="w-full flex items-center justify-between gap-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors"
-                  >
-                    <span className="flex items-center gap-2">
-                      ตัวกรองและเรียงลำดับ
-                      {activeFilterCount > 0 && (
-                        <span className="bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
-                          {activeFilterCount}
-                        </span>
-                      )}
-                    </span>
-                    <span className="flex items-center gap-1 text-slate-400 text-[11px]">
-                      <svg
-                        className={`w-3.5 h-3.5 transition-transform duration-300 ${filtersOpen ? "rotate-180" : "rotate-0"}`}
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
+                  <div className="grid grid-cols-1 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                        เรียงลำดับเหตุ
+                      </label>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
                       >
-                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                      </svg>
-                    </span>
-                  </button>
-                  <div
-                    id="incident-filter-panel"
-                    className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${filtersOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
-                  >
-                    <div className="overflow-hidden min-h-0" inert={!filtersOpen}>
-                      <div className="grid grid-cols-1 gap-2">
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                            เรียงลำดับเหตุ
-                          </label>
-                          <select
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value)}
-                            className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-                          >
-                            {SORT_OPTIONS.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
-                          </select>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                              กรองประเภทของเหตุ
-                            </label>
-                            <select
-                              value={typeFilter}
-                              onChange={(e) => setTypeFilter(e.target.value)}
-                              className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-                            >
-                              <option value="all">ทุกประเภทเหตุ</option>
-                              {toOptions(INCIDENT_TYPES).map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                              กรองระดับความรุนแรง
-                            </label>
-                            <select
-                              value={severityFilter}
-                              onChange={(e) => setSeverityFilter(e.target.value)}
-                              className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-                            >
-                              {toOptions(SEVERITIES).map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
-                            </select>
-                          </div>
-                        </div>
+                        {SORT_OPTIONS.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                          กรองประเภทของเหตุ
+                        </label>
+                        <select
+                          value={typeFilter}
+                          onChange={(e) => setTypeFilter(e.target.value)}
+                          className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                        >
+                          <option value="all">ทุกประเภทเหตุ</option>
+                          {toOptions(INCIDENT_TYPES).map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-400 mb-1">
+                          กรองระดับความรุนแรง
+                        </label>
+                        <select
+                          value={severityFilter}
+                          onChange={(e) => setSeverityFilter(e.target.value)}
+                          className="w-full min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                        >
+                          {toOptions(SEVERITIES).map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                        </select>
                       </div>
                     </div>
-                  </div></div>
+                  </div>
+                </div>
 
                 <div className="flex-1 flex flex-col gap-3 overflow-y-auto pb-4 pr-2 custom-scrollbar">
                   {loading && (

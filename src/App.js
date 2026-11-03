@@ -6,6 +6,7 @@ import { auth, db, isRegisteringStaff } from './config/firebase';
 
 import LoginScreen from './components/LoginScreen';
 import DashboardContent from './components/DashboardContent';
+import { clearAdminSecretKeyFromMemory } from './components/ReporterDetailModal';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -21,6 +22,7 @@ export default function App() {
         }
 
         if (!currentUser) {
+          clearAdminSecretKeyFromMemory();
           setUser(null);
           setProfile(null);
           setRole(null);
