@@ -3,7 +3,7 @@ export const DATE_PRESETS = [
   { value: "today", label: "วันนี้" },
   { value: "week", label: "สัปดาห์นี้" },
   { value: "month", label: "เดือนนี้" },
-  { value: "custom", label: "กำหนดช่วงวันที่เอง" },
+  { value: "custom", label: "กำหนดช่วงวันที่" },
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
