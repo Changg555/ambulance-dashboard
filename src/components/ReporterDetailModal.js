@@ -1,30 +1,12 @@
-import React, { useEffect, useState } from "react";
-import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  serverTimestamp,
-} from "firebase/firestore";
-import { auth, db } from "../config/firebase";
-import {
-  decryptIdCard,
-  formatIdCardNumber,
-  unlockKey,
-} from "../utils/idcardAdmin";
+import React, { useEffect, useRef, useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../config/firebase";
+import { formatIdCardNumber } from "../utils/idcardAdmin";
+import { requestIdCardOtp, decryptIdCardWithOtp } from "../utils/idcardApi";
 
-// เก็บ secretKey ไว้เฉพาะในตัวแปรหน่วยความจำของแท็บปัจจุบัน (ไม่ลง localStorage/sessionStorage เด็ดขาด)
-// เมื่อรีเฟรชหน้าเว็บหรือกดปุ่มล็อกคีย์ ค่าจะถูกล้างเป็น null ทันที
-let inMemorySecretKey = null;
-
-export function clearAdminSecretKeyFromMemory() {
-  if (inMemorySecretKey) {
-    try {
-      inMemorySecretKey.fill(0);
-    } catch {}
-    inMemorySecretKey = null;
-  }
-}
+const OTP_LENGTH = 6;
+const OTP_TTL_SECONDS = 300; // OTP หมดอายุใน 5 นาที
+const RESEND_COOLDOWN_SECONDS = 60; // ขอ OTP ใหม่ได้ทุก 60 วินาที
 
 function formatBirthDateAndAge(isoOrDate) {
   if (!isoOrDate) return "-";
@@ -47,6 +29,12 @@ function formatBirthDateAndAge(isoOrDate) {
   return age >= 0 ? `${dateText} (อายุ ${age} ปี)` : dateText;
 }
 
+function formatClock(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export default function ReporterDetailModal({
   isOpen,
   onClose,
@@ -59,15 +47,21 @@ export default function ReporterDetailModal({
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [profileError, setProfileError] = useState("");
 
-  // สถานะสำหรับ Admin ถอดรหัสเลขบัตรประชาชน
-  const [hasUnlockedKey, setHasUnlockedKey] = useState(() => Boolean(inMemorySecretKey));
-  const [showUnlockForm, setShowUnlockForm] = useState(false);
-  const [keyFile, setKeyFile] = useState(null);
-  const [password, setPassword] = useState("");
-  const [unlocking, setUnlocking] = useState(false);
+  // สถานะสำหรับ Admin ถอดรหัสเลขบัตรประชาชนด้วย OTP
+  const [showOtpForm, setShowOtpForm] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [otpSentTo, setOtpSentTo] = useState("");
+  const [busy, setBusy] = useState(false);
   const [decryptError, setDecryptError] = useState("");
   const [revealedIdCard, setRevealedIdCard] = useState(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+
+  // นับเวลา OTP: อายุของรหัส และเวลารอก่อนขอรหัสใหม่
+  const [otpExpiresIn, setOtpExpiresIn] = useState(0);
+  const [resendIn, setResendIn] = useState(0);
+  const [shakeKey, setShakeKey] = useState(0);
+
+  const inputRefs = useRef([]);
 
   // โหลดข้อมูลทั่วไปของผู้แจ้งเหตุจาก users/{uid}
   useEffect(() => {
@@ -76,9 +70,11 @@ export default function ReporterDetailModal({
     setRevealedIdCard(null);
     setSecondsLeft(0);
     setDecryptError("");
-    setShowUnlockForm(false);
-    setPassword("");
-    setHasUnlockedKey(Boolean(inMemorySecretKey));
+    setShowOtpForm(false);
+    setOtp("");
+    setOtpSentTo("");
+    setOtpExpiresIn(0);
+    setResendIn(0);
 
     if (!reporterUid) {
       setProfile(null);
@@ -129,104 +125,123 @@ export default function ReporterDetailModal({
     return () => clearInterval(timer);
   }, [revealedIdCard, secondsLeft]);
 
+  // นับถอยหลังอายุ OTP และเวลารอขอรหัสใหม่ (ทำงานตอนฟอร์ม OTP เปิดอยู่)
+  useEffect(() => {
+    if (!showOtpForm) return;
+
+    const timer = setInterval(() => {
+      setOtpExpiresIn((prev) => (prev > 0 ? prev - 1 : 0));
+      setResendIn((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [showOtpForm]);
+
+  // โฟกัสช่องแรกเมื่อฟอร์ม OTP เปิดขึ้น
+  useEffect(() => {
+    if (showOtpForm) {
+      inputRefs.current[0]?.focus();
+    }
+  }, [showOtpForm]);
+
   if (!isOpen) return null;
 
-  // ดึง users_private/{uid} มาถอดรหัสด้วย secretKey และบันทึก idcard_audit
-  const decryptAndReveal = async (secretKeyToUse) => {
-    if (!reporterUid) {
-      setDecryptError("ไม่พบรหัสผู้ใช้ (UID) ของผู้แจ้งเหตุรายนี้");
-      return;
-    }
-
-    const privateSnap = await getDoc(doc(db, "users_private", reporterUid));
-    if (!privateSnap.exists() || !privateSnap.data()?.idcardSealed) {
-      throw new Error("ไม่พบข้อมูลเลขบัตรที่เข้ารหัสไว้ใน users_private");
-    }
-
-    const plainIdCard = decryptIdCard(
-      privateSnap.data().idcardSealed,
-      secretKeyToUse
-    );
-
-    // บันทึก Audit Log ลงคอลเลกชัน idcard_audit
-    try {
-      await addDoc(collection(db, "idcard_audit"), {
-        adminUid: auth.currentUser?.uid || null,
-        adminEmail: auth.currentUser?.email || null,
-        targetUid: reporterUid,
-        incidentId: incidentId || null,
-        at: serverTimestamp(),
-      });
-    } catch (auditErr) {
-      console.warn("Could not write idcard_audit log:", auditErr);
-    }
-
-    setRevealedIdCard(formatIdCardNumber(plainIdCard));
-    setSecondsLeft(30);
-    setShowUnlockForm(false);
-  };
-
-  // เมื่อกดปุ่ม "ดูเลขเต็ม"
+  // กด "ดูเลขเต็ม" หรือ "ขอรหัสใหม่" -> ขอ OTP จาก backend (ส่งไปอีเมล Admin)
   const handleClickReveal = async () => {
     setDecryptError("");
-
-    // ถ้ามี key ปลดล็อกอยู่ในหน่วยความจำแล้ว ให้ถอดรหัสทันที
-    if (inMemorySecretKey) {
-      setUnlocking(true);
-      try {
-        await decryptAndReveal(inMemorySecretKey);
-      } catch (err) {
-        setDecryptError(err.message || "ถอดรหัสเลขบัตรไม่สำเร็จ");
-      } finally {
-        setUnlocking(false);
-      }
-      return;
+    setBusy(true);
+    try {
+      const result = await requestIdCardOtp(reporterUid);
+      setOtpSentTo(result.sentTo || "");
+      setOtp("");
+      setOtpExpiresIn(OTP_TTL_SECONDS);
+      setResendIn(RESEND_COOLDOWN_SECONDS);
+      setShowOtpForm(true);
+      setTimeout(() => inputRefs.current[0]?.focus(), 0);
+    } catch (err) {
+      setDecryptError(err.message || "ส่ง OTP ไม่สำเร็จ");
+    } finally {
+      setBusy(false);
     }
-
-    // ถ้ายังไม่มี key ในหน่วยความจำ ให้เปิดฟอร์มเลือกไฟล์ idcard-key.enc.json + รหัสผ่าน
-    setShowUnlockForm(true);
   };
 
-  // เมื่อกดปลดล็อกไฟล์ idcard-key.enc.json ด้วยรหัสผ่าน
-  const handleUnlockAndDecrypt = async (e) => {
+  // กรอก OTP แล้วกดยืนยัน -> backend ถอดรหัสให้ แล้วเราแสดงผล 30 วินาที
+  const handleConfirmOtp = async (e) => {
     e.preventDefault();
     setDecryptError("");
 
-    if (!keyFile) {
-      setDecryptError("กรุณาเลือกไฟล์ idcard-key.enc.json");
-      return;
-    }
-    if (!password) {
-      setDecryptError("กรุณากรอกรหัสผ่านสำหรับปลดล็อกคีย์");
+    if (otpExpiresIn <= 0) {
+      setDecryptError("รหัส OTP หมดอายุแล้ว กรุณาขอรหัสใหม่");
       return;
     }
 
-    setUnlocking(true);
+    if (otp.length !== OTP_LENGTH) {
+      setDecryptError(`กรุณากรอกรหัส OTP ให้ครบ ${OTP_LENGTH} หลัก`);
+      setShakeKey((k) => k + 1);
+      return;
+    }
+
+    setBusy(true);
     try {
-      const fileText = await keyFile.text();
-      const sk = await unlockKey(fileText, password);
-      inMemorySecretKey = sk;
-      setHasUnlockedKey(true);
-      setPassword("");
-
-      await decryptAndReveal(sk);
+      const result = await decryptIdCardWithOtp(reporterUid, incidentId, otp);
+      setRevealedIdCard(formatIdCardNumber(result.idcard));
+      setSecondsLeft(30);
+      setShowOtpForm(false);
+      setOtp("");
     } catch (err) {
-      setDecryptError(err.message || "รหัสผ่านไม่ถูกต้อง หรือไฟล์คีย์เสียหาย");
+      setDecryptError(err.message || "ถอดรหัสไม่สำเร็จ");
+      setShakeKey((k) => k + 1);
+      setOtp("");
+      setTimeout(() => inputRefs.current[0]?.focus(), 0);
     } finally {
-      setUnlocking(false);
+      setBusy(false);
     }
   };
 
-  // ล้างคีย์และซ่อนเลขบัตรออกจากหน่วยความจำทันที
-  const handleLockKey = () => {
-    clearAdminSecretKeyFromMemory();
-    setHasUnlockedKey(false);
-    setRevealedIdCard(null);
-    setSecondsLeft(0);
-    setShowUnlockForm(false);
-    setPassword("");
-    setKeyFile(null);
+  // ---- ตัวช่วยสำหรับช่องกรอก OTP แบบแยกหลัก ----
+  const handleOtpChange = (index, value) => {
+    const digit = value.replace(/\D/g, "").slice(-1);
+    if (!digit) return;
+    const chars = otp.padEnd(OTP_LENGTH, " ").split("");
+    chars[index] = digit;
+    setOtp(chars.join("").replace(/ /g, ""));
+    if (decryptError) setDecryptError("");
+    if (index < OTP_LENGTH - 1) inputRefs.current[index + 1]?.focus();
   };
+
+  const handleOtpKeyDown = (index, e) => {
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      if (otp[index]) {
+        setOtp(otp.slice(0, index) + otp.slice(index + 1));
+      } else if (index > 0) {
+        setOtp(otp.slice(0, index - 1) + otp.slice(index));
+        inputRefs.current[index - 1]?.focus();
+      }
+    } else if (e.key === "ArrowLeft" && index > 0) {
+      e.preventDefault();
+      inputRefs.current[index - 1]?.focus();
+    } else if (e.key === "ArrowRight" && index < OTP_LENGTH - 1) {
+      e.preventDefault();
+      inputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const pasted = e.clipboardData
+      .getData("text")
+      .replace(/\D/g, "")
+      .slice(0, OTP_LENGTH);
+    if (!pasted) return;
+    setOtp(pasted);
+    if (decryptError) setDecryptError("");
+    inputRefs.current[Math.min(pasted.length, OTP_LENGTH - 1)]?.focus();
+  };
+
+  const otpExpired = otpExpiresIn <= 0;
+  const otpProgress = Math.max(0, (otpExpiresIn / OTP_TTL_SECONDS) * 100);
+  const otpUrgent = !otpExpired && otpExpiresIn <= 60;
 
   const fullName =
     [profile?.firstname, profile?.lastname].filter(Boolean).join(" ") ||
@@ -243,6 +258,20 @@ export default function ReporterDetailModal({
       className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}
     >
+      <style>{`
+        @keyframes otp-shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-6px); }
+          40% { transform: translateX(6px); }
+          60% { transform: translateX(-4px); }
+          80% { transform: translateX(4px); }
+        }
+        .otp-shake { animation: otp-shake 0.35s ease-in-out; }
+        @media (prefers-reduced-motion: reduce) {
+          .otp-shake { animation: none; }
+        }
+      `}</style>
+
       <div
         className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden"
         onClick={(e) => e.stopPropagation()}
@@ -359,32 +388,18 @@ export default function ReporterDetailModal({
                         <button
                           type="button"
                           onClick={handleClickReveal}
-                          disabled={unlocking}
+                          disabled={busy || showOtpForm}
                           className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm transition"
                         >
-                          {unlocking ? "กำลังถอดรหัส..." : "ดูเลขเต็ม (Admin)"}
+                          {busy && !showOtpForm ? "กำลังส่ง OTP..." : "ดูเลขเต็ม (Admin)"}
                         </button>
                       ) : (
                         <button
                           type="button"
-                          onClick={() => {
-                            setRevealedIdCard(null);
-                            setSecondsLeft(0);
-                          }}
+                          onClick={() => { setRevealedIdCard(null); setSecondsLeft(0); }}
                           className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl transition"
                         >
                           ซ่อนเลขบัตร
-                        </button>
-                      )}
-
-                      {hasUnlockedKey && (
-                        <button
-                          type="button"
-                          onClick={handleLockKey}
-                          title="ล้าง Private Key ออกจากหน่วยความจำ"
-                          className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3 py-2 rounded-xl transition"
-                        >
-                          ล็อกคีย์
                         </button>
                       )}
                     </div>
@@ -397,70 +412,162 @@ export default function ReporterDetailModal({
                   </p>
                 )}
 
-                {decryptError && (
-                  <div className="bg-red-50 border border-red-200 text-red-600 text-xs font-bold px-3 py-2 rounded-lg">
+                {/* ข้อผิดพลาดตอนขอ OTP (ก่อนเปิดฟอร์ม) */}
+                {decryptError && !showOtpForm && (
+                  <div
+                    role="alert"
+                    className="bg-red-50 border border-red-200 text-red-600 text-xs font-bold px-3 py-2 rounded-lg"
+                  >
                     ❌ {decryptError}
                   </div>
                 )}
 
-                {/* ฟอร์มเลือกไฟล์ idcard-key.enc.json และใส่รหัสผ่าน (แสดงเมื่อ Admin กดดูเลขเต็มครั้งแรกในเซสชัน) */}
-                {role === "admin" && showUnlockForm && !revealedIdCard && (
+                {/* ===== ฟอร์มยืนยัน OTP (ดีไซน์ใหม่) ===== */}
+                {role === "admin" && showOtpForm && !revealedIdCard && (
                   <form
-                    onSubmit={handleUnlockAndDecrypt}
-                    className="mt-3 pt-3 border-t border-slate-200 space-y-3 bg-white p-4 rounded-xl border"
+                    onSubmit={handleConfirmOtp}
+                    className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden"
                   >
-                    <p className="text-xs font-bold text-slate-800">
-                      ปลดล็อก Private Key ของแอดมิน (ทำครั้งแรกในเซสชัน)
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      เลือกไฟล์ <code className="font-mono bg-slate-100 px-1 rounded">idcard-key.enc.json</code> และกรอกรหัสผ่านแอดมิน (คีย์จะถูกเก็บไว้ในหน่วยความจำชั่วคราวเท่านั้น ไม่บันทึกลงดิสก์)
-                    </p>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">
-                        1. ไฟล์คีย์แอดมิน (idcard-key.enc.json)
-                      </label>
-                      <input
-                        type="file"
-                        accept=".json,application/json"
-                        onChange={(e) => setKeyFile(e.target.files?.[0] || null)}
-                        className="block w-full text-xs text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-red-50 file:text-red-600 hover:file:bg-red-100 cursor-pointer"
+                    {/* แถบเวลาที่เหลือของ OTP */}
+                    <div className="h-1 bg-slate-100">
+                      <div
+                        className={`h-full transition-all duration-1000 ease-linear ${
+                          otpExpired
+                            ? "bg-slate-300"
+                            : otpUrgent
+                            ? "bg-amber-500"
+                            : "bg-emerald-500"
+                        }`}
+                        style={{ width: `${otpProgress}%` }}
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">
-                        2. รหัสผ่านปลดล็อกไฟล์คีย์ (Passphrase)
-                      </label>
-                      <input
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="กรอกรหัสผ่านปลดล็อกคีย์ (เช่น Key-XXXX-XXXX-XXX)"
-                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-                      />
-                    </div>
+                    <div className="p-5 space-y-5">
+                      {/* หัวข้อ */}
+                      <div className="flex items-start gap-3">
+                        <div className="shrink-0 w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="w-5 h-5"
+                            aria-hidden="true"
+                          >
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            <path d="m9 12 2 2 4-4" />
+                          </svg>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-slate-800">
+                            ยืนยันตัวตนก่อนดูเลขบัตรเต็ม
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                            เราส่งรหัส {OTP_LENGTH} หลักไปที่{" "}
+                            <span className="font-bold text-slate-700 break-all">
+                              {otpSentTo || "อีเมลของคุณ"}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
 
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowUnlockForm(false);
-                          setDecryptError("");
-                        }}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:bg-slate-100"
-                      >
-                        ยกเลิก
-                      </button>
+                      {/* ช่องกรอก OTP แยกหลัก */}
+                      <div>
+                        <div
+                          key={shakeKey}
+                          className={`flex justify-center gap-2 sm:gap-2.5 ${
+                            shakeKey > 0 && decryptError ? "otp-shake" : ""
+                          }`}
+                          onPaste={handleOtpPaste}
+                        >
+                          {Array.from({ length: OTP_LENGTH }).map((_, i) => (
+                            <input
+                              key={i}
+                              ref={(el) => (inputRefs.current[i] = el)}
+                              type="text"
+                              inputMode="numeric"
+                              autoComplete={i === 0 ? "one-time-code" : "off"}
+                              maxLength={1}
+                              value={otp[i] || ""}
+                              disabled={busy || otpExpired}
+                              onChange={(e) => handleOtpChange(i, e.target.value)}
+                              onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                              onFocus={(e) => e.target.select()}
+                              aria-label={`หลักที่ ${i + 1} ของรหัส OTP`}
+                              className={`w-11 h-14 sm:w-12 sm:h-14 text-center text-2xl font-mono font-bold rounded-xl border-2 bg-slate-50 text-slate-800 transition focus:outline-none focus:bg-white disabled:opacity-40 disabled:cursor-not-allowed ${
+                                decryptError
+                                  ? "border-red-300 focus:border-red-500 focus:ring-4 focus:ring-red-500/15"
+                                  : otp[i]
+                                  ? "border-emerald-400 bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/15"
+                                  : "border-slate-200 focus:border-slate-800 focus:ring-4 focus:ring-slate-800/10"
+                              }`}
+                            />
+                          ))}
+                        </div>
+
+                        {/* สถานะใต้ช่องกรอก */}
+                        <div className="mt-3 min-h-[1.25rem] text-center text-xs font-semibold">
+                          {decryptError ? (
+                            <p role="alert" className="text-red-600">
+                              {decryptError}
+                            </p>
+                          ) : otpExpired ? (
+                            <p className="text-slate-500">
+                              รหัสหมดอายุแล้ว กดขอรหัสใหม่เพื่อดำเนินการต่อ
+                            </p>
+                          ) : (
+                            <p
+                              className={
+                                otpUrgent ? "text-amber-600" : "text-slate-500"
+                              }
+                            >
+                              รหัสหมดอายุใน{" "}
+                              <span className="font-mono font-bold">
+                                {formatClock(otpExpiresIn)}
+                              </span>{" "}
+                              นาที
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* ปุ่มยืนยัน */}
                       <button
                         type="submit"
-                        disabled={unlocking}
-                        className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-sm transition"
+                        disabled={busy || otpExpired || otp.length !== OTP_LENGTH}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white py-2.5 rounded-xl text-sm font-bold shadow-sm transition"
                       >
-                        {unlocking
-                          ? "กำลังปลดล็อกคีย์ (1-3 วินาที)..."
-                          : "ปลดล็อกและดูเลขบัตร"}
+                        {busy ? "กำลังตรวจสอบ..." : "ยืนยันและดูเลขบัตร"}
                       </button>
+
+                      {/* ลิงก์รอง: ยกเลิก / ขอรหัสใหม่ */}
+                      <div className="flex items-center justify-between text-xs font-bold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowOtpForm(false);
+                            setDecryptError("");
+                            setOtp("");
+                          }}
+                          className="text-slate-500 hover:text-slate-800 px-1 py-1 rounded transition"
+                        >
+                          ยกเลิก
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleClickReveal}
+                          disabled={busy || resendIn > 0}
+                          className="text-red-600 hover:text-red-700 disabled:text-slate-400 disabled:cursor-not-allowed px-1 py-1 rounded transition"
+                        >
+                          {resendIn > 0
+                            ? `ขอรหัสใหม่ได้ใน ${resendIn} วินาที`
+                            : "ขอรหัสใหม่"}
+                        </button>
+                      </div>
                     </div>
                   </form>
                 )}

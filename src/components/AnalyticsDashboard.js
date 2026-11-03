@@ -9,6 +9,9 @@ import { toMillis } from "../hooks/useIncidents";
 import { INCIDENT_TYPES, SEVERITIES, STATUS_LABELS, toOptions } from "../constants/incident";
 import { csvCell, rowsToCsv, downloadCsv, isoDate } from "../utils/csv";
 import { avgMin, buildCrossTab, computeDailyStats, diffMin, getStatusTime, normType, sumDaily, } from "../utils/analyticsStats";
+import { formatMinutes } from "../utils/formatDuration";
+import { getDataDateRange, getExportDateTime } from "../utils/dataRange";
+import { DATE_PRESETS, isWithinDateRange } from "../utils/dateFilter";
 
 const KPS_CENTER = { lat: 14.028746607870978, lng: 99.97823358223988 };
 
@@ -20,14 +23,6 @@ const MAP_OPTIONS = {
   mapTypeControl: false,
   fullscreenControl: true,
 };
-
-const DATE_PRESETS = [
-  { value: "all", label: "ทั้งหมด" },
-  { value: "today", label: "วันนี้" },
-  { value: "week", label: "สัปดาห์นี้" },
-  { value: "month", label: "เดือนนี้" },
-  { value: "custom", label: "กำหนดช่วงวันที่เอง" },
-];
 
 function getCoordinates(location) {
   const lat = Number(location?.latitude ?? location?.lat);
@@ -50,69 +45,6 @@ function createMapMarkerIcon(color = "#EF4444") {
     scaledSize: new window.google.maps.Size(30, 38),
     anchor: new window.google.maps.Point(15, 38),
   };
-}
-
-// ตรวจสอบว่าเวลาอยู่ในช่วงวันที่ที่เลือกหรือไม่
-function isWithinDateRange(createdAtMs, datePreset, customStart, customEnd) {
-  if (datePreset === "all") return true;
-  if (!createdAtMs) return false;
-
-  const now = new Date();
-
-  if (datePreset === "today") {
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    ).getTime();
-    const endOfToday = startOfToday + 24 * 60 * 60 * 1000 - 1;
-    return createdAtMs >= startOfToday && createdAtMs <= endOfToday;
-  }
-
-  if (datePreset === "week") {
-    const dayOfWeek = now.getDay();
-    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const startOfWeek = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() - diffToMonday
-    ).getTime();
-    const endOfToday =
-      new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() +
-      24 * 60 * 60 * 1000 -
-      1;
-    return createdAtMs >= startOfWeek && createdAtMs <= endOfToday;
-  }
-
-  if (datePreset === "month") {
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const endOfMonth = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0,
-      23,
-      59,
-      59,
-      999
-    ).getTime();
-    return createdAtMs >= startOfMonth && createdAtMs <= endOfMonth;
-  }
-
-  if (datePreset === "custom") {
-    let minMs = -Infinity;
-    let maxMs = Infinity;
-    if (customStart) {
-      const [y, m, d] = customStart.split("-").map(Number);
-      minMs = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-    }
-    if (customEnd) {
-      const [y, m, d] = customEnd.split("-").map(Number);
-      maxMs = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
-    }
-    return createdAtMs >= minMs && createdAtMs <= maxMs;
-  }
-
-  return true;
 }
 
 /**
@@ -172,7 +104,6 @@ function exportAnalyticsReportToCsv({
   crossTab,
   dailyStats,
   dailyTotals,
-  datePresetLabel,
   typeFilterLabel,
   severityFilterLabel,
   totalCases,
@@ -181,6 +112,7 @@ function exportAnalyticsReportToCsv({
   customEndDate = "",
   typeFilter = "all",
   severityFilter = "all",
+  dataRangeText = "-",
 }) {
   const R = (...cells) => cells.map((c) => csvCell(c));
   const total = summary?.total || 0;
@@ -192,8 +124,8 @@ function exportAnalyticsReportToCsv({
 
   // ---------- หัวรายงาน ----------
   rows.push(R("รายงานสรุปเชิงสถิติและการวิเคราะห์การปฏิบัติการฉุกเฉิน (KPS Analytics Summary Report)"));
-  rows.push(R("วันที่สร้างรายงาน", new Date().toLocaleString("th-TH")));
-  rows.push(R("ช่วงเวลาที่เลือก", datePresetLabel));
+  rows.push(R("วันที่สร้างรายงาน", getExportDateTime())); 
+  rows.push(R("ช่วงวันที่ของข้อมูล", dataRangeText)); 
   rows.push(R("เงื่อนไขประเภทเหตุ", typeFilterLabel));
   rows.push(R("เงื่อนไขระดับความรุนแรง", severityFilterLabel));
   rows.push(R("จำนวนเหตุที่นำมาวิเคราะห์", totalCases));
@@ -575,7 +507,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
       if (severityFilter !== "all" && item.severity !== severityFilter) {
         return false;
       }
-
+ 
       return true;
     });
   }, [
@@ -646,13 +578,6 @@ export default function AnalyticsDashboard({ incidents = [] }) {
   }, [dailyView, dailyTotals]);
 
   const handleExportAnalyticsReport = () => {
-    let datePresetLabel = "ทั้งหมด";
-    if (datePreset === "custom") {
-      datePresetLabel = `${customStartDate || "เริ่มต้น"} ถึง ${customEndDate || "ปัจจุบัน"}`;
-    } else {
-      datePresetLabel =
-        DATE_PRESETS.find((p) => p.value === datePreset)?.label || "ทั้งหมด";
-    }
 
     const typeFilterLabel =
       typeFilter === "all"
@@ -671,7 +596,6 @@ export default function AnalyticsDashboard({ incidents = [] }) {
       crossTab,
       dailyStats,
       dailyTotals,
-      datePresetLabel,
       typeFilterLabel,
       severityFilterLabel,
       totalCases: filteredIncidents.length,
@@ -680,6 +604,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
       customEndDate,
       typeFilter,
       severityFilter,
+      dataRangeText: getDataDateRange(filteredIncidents),
     });
   };
 
@@ -827,7 +752,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
         />
         <StatCard
           title="เวลาดำเนินการเฉลี่ย"
-          value={filteredSummary.avgHandlingMinutes != null ? `${filteredSummary.avgHandlingMinutes} นาที` : "-"}
+          value={formatMinutes(filteredSummary.avgHandlingMinutes)}
           sub="ตั้งแต่แจ้งเหตุจนเสร็จสิ้น"
         />
       </div>
@@ -1019,7 +944,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
                       <td className="py-3.5 px-4 text-center font-bold text-emerald-600">{day.completed}</td>
                       <td className="py-3.5 px-4 text-center font-semibold text-slate-500">{day.cancelled}</td>
                       <td className="py-3.5 px-4 text-right font-bold text-slate-700 whitespace-nowrap">
-                        {day.avgHandlingMinutes != null ? `${day.avgHandlingMinutes} นาที` : "-"}
+                        {formatMinutes(day.avgHandlingMinutes)}
                       </td>
                     </tr>
                   );
@@ -1036,7 +961,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
                   <td className="py-3.5 px-4 text-center text-emerald-600">{dailyTotals.completed}</td>
                   <td className="py-3.5 px-4 text-center text-slate-500">{dailyTotals.cancelled}</td>
                   <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                    {dailyTotals.avgHandlingMinutes != null ? `${dailyTotals.avgHandlingMinutes} นาที` : "-"}
+                    {formatMinutes(dailyTotals.avgHandlingMinutes)}
                   </td>
                 </tr>
               </tfoot>
