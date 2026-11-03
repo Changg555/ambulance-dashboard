@@ -463,7 +463,7 @@ export default function ReporterDetailModal({
                         </div>
                         <div className="min-w-0">
                           <p className="text-sm font-bold text-slate-800">
-                            ยืนยันตัวตนก่อนดูเลขบัตรเต็ม
+                            ยืนยันตัวตนก่อนดูเลขบัตรประชาชนแบบเต็ม
                           </p>
                           <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
                             เราส่งรหัส {OTP_LENGTH} หลักไปที่{" "}
