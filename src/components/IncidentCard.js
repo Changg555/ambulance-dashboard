@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { toMillis } from "../hooks/useIncidents";
 import ReporterDetailModal from "./ReporterDetailModal";
-import { INCIDENT_TYPES, SEVERITIES, STATUS_FLOW, STATUS_LABELS } from "../constants/incident";
+import { INCIDENT_TYPES, SEVERITIES, STATUS_FLOW, STATUS_LABELS, STAFF_CANCEL_REASONS } from "../constants/incident";
+import CancelReasonModal from "./CancelReasonModal";
 
 const SEVERITY_CLASSNAMES = {
   low: "bg-emerald-100 text-emerald-700",
@@ -17,12 +18,6 @@ const STATUS_OPTIONS = [
   { value: "arrived", label: "ถึงจุดเกิดเหตุ" },
   { value: "completed", label: "เสร็จสิ้น" },
 ];
-
-// ข้อความยืนยัน action ที่มีผลต่อข้อมูลจริง
-const CONFIRM_MESSAGES = {
-  cancel: "ต้องการยกเลิกเคสนี้ใช่หรือไม่? เคสจะถูกเก็บไว้ในประวัติ",
-  delete: "ต้องการลบเคสนี้ถาวรใช่หรือไม่? ข้อมูลจะหายจาก Firebase ทันที",
-};
 
 // แสดงวันที่/เวลาแบบไทย และกันค่าว่างไม่ให้แสดง Invalid Date
 function formatTime(time) {
@@ -68,9 +63,8 @@ function getCardClassName(isSelected) {
     "border-2 border-amber-400 shadow-[0_0_0_4px_rgba(251,191,36,0.15)] bg-amber-50/20";
   const defaultClass = "border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md";
 
-  return `bg-white rounded-2xl p-5 cursor-pointer transition-all duration-200 ${
-    isSelected ? selectedClass : defaultClass
-  }`;
+  return `bg-white rounded-2xl p-5 cursor-pointer transition-all duration-200 ${isSelected ? selectedClass : defaultClass
+    }`;
 }
 
 // เลือกสี badge สถานะตามความหมายของสถานะปัจจุบัน
@@ -303,18 +297,16 @@ function IncidentTimeline({ timeline }) {
             <div key={item?.id || `${timelineStatus}-${index}`} className="flex gap-3">
               <div className="flex flex-col items-center">
                 <div
-                  className={`w-2.5 h-2.5 rounded-full mt-1 ${
-                    isLast ? "bg-red-500 ring-4 ring-red-50" : "bg-slate-300"
-                  }`}
+                  className={`w-2.5 h-2.5 rounded-full mt-1 ${isLast ? "bg-red-500 ring-4 ring-red-50" : "bg-slate-300"
+                    }`}
                 />
                 {!isLast && <div className="w-0.5 h-full bg-slate-200 my-1" />}
               </div>
 
               <div className="flex-1 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                 <span
-                  className={`text-[13px] ${
-                    isLast ? "font-bold text-slate-800" : "font-semibold text-slate-500"
-                  }`}
+                  className={`text-[13px] ${isLast ? "font-bold text-slate-800" : "font-semibold text-slate-500"
+                    }`}
                 >
                   {item?.note || item?.label || STATUS_LABELS[timelineStatus] || "-"}
                 </span>
@@ -362,18 +354,16 @@ function StatusActionGrid({ currentStatus, incidentId, onUpdateStatus }) {
 }
 
 // ปุ่มยกเลิกเคส โดยแยก confirm ไว้ให้ component หลักไม่รก
-function DangerActions({ incidentId, canCancel, onCancel }) {
-  const confirmAndRun = (event, message, action) => {
-    event.stopPropagation();
-    if (window.confirm(message)) action(incidentId);
-  };
-
+function DangerActions({ canCancel, onRequestCancel }) {
   if (!canCancel) return null;
 
   return (
     <button
       type="button"
-      onClick={(event) => confirmAndRun(event, CONFIRM_MESSAGES.cancel, onCancel)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onRequestCancel();
+      }}
       className="w-full mt-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl px-3 py-3 transition-all"
     >
       ยกเลิกเคส
@@ -527,6 +517,7 @@ export default function IncidentCard({
 }) {
   const [previewImage, setPreviewImage] = useState(null);
   const [showReporterModal, setShowReporterModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
 
   if (!incident) return null;
 
@@ -562,11 +553,8 @@ export default function IncidentCard({
         )}
 
         <DangerActions
-          incidentId={incident.id}
           canCancel={canCancel}
-          role={role}
-          onCancel={onCancel}
-          onDelete={onDelete}
+          onRequestCancel={() => setShowCancelModal(true)}
         />
       </div>
 
@@ -579,6 +567,14 @@ export default function IncidentCard({
         fallbackReporter={incident.reporter}
         incidentId={incident.id}
         role={role}
+      />
+
+      <CancelReasonModal
+        isOpen={showCancelModal}
+        title="ยกเลิกเคสนี้?"
+        reasons={STAFF_CANCEL_REASONS}
+        onClose={() => setShowCancelModal(false)}
+        onConfirm={(payload) => onCancel(incident.id, payload)}
       />
     </>
   );

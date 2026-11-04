@@ -12,7 +12,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
-import { CLOSED_STATUSES, STATUS_LABELS } from "../constants/incident";
+import { CLOSED_STATUSES, STATUS_LABELS, CANCEL_REASON_LABELS, formatCancelReason } from "../constants/incident";
 
 // แปลงค่าเวลา (Firestore Timestamp / Date / number / ISO string) ให้เป็น milliseconds
 export function toMillis(val) {
@@ -32,8 +32,8 @@ function calcDistance(lat1, lng1, lat2, lng2) {
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
 
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
@@ -211,10 +211,10 @@ export function useIncidents({ user, profile } = {}) {
       const subTimeline = timelinesMap[item.id];
       const legacyTimeline = Array.isArray(item.timeline)
         ? item.timeline.map((t) => ({
-            ...t,
-            status: t.status || "pending",
-            time: toMillis(t.at ?? t.time),
-          }))
+          ...t,
+          status: t.status || "pending",
+          time: toMillis(t.at ?? t.time),
+        }))
         : [];
       const timeline =
         subTimeline && subTimeline.length > 0 ? subTimeline : legacyTimeline;
@@ -313,12 +313,12 @@ export function useIncidents({ user, profile } = {}) {
     const avgResponseTime =
       completedWithTime.length > 0
         ? Math.round(
-            completedWithTime.reduce((sum, item) => {
-              return sum + (item.completedAt - item.createdAt);
-            }, 0) /
-              completedWithTime.length /
-              60000
-          )
+          completedWithTime.reduce((sum, item) => {
+            return sum + (item.completedAt - item.createdAt);
+          }, 0) /
+          completedWithTime.length /
+          60000
+        )
         : 0;
 
     return {
@@ -385,28 +385,35 @@ export function useIncidents({ user, profile } = {}) {
   };
 
   // ยกเลิกเคสตามโครงสร้างเดียวกับ cancelIncident ฝั่ง Mobile
-  const cancelIncident = async (incidentId) => {
-    const incident = incidents.find((item) => item.id === incidentId);
-    if (!incident) return;
+ const cancelIncident = async (incidentId, { reason, note } = {}) => {
+  const incident = incidents.find((item) => item.id === incidentId);
+  if (!incident) return;
 
-    const batch = writeBatch(db);
-    const incRef = doc(db, "incidents", incidentId);
-    const tlRef = doc(collection(db, "incidents", incidentId, "timeline"));
+  const cleanNote = (note || "").trim();
+  const reasonText =
+    formatCancelReason({ cancelReason: { reason, note: cleanNote } }) || "ไม่ระบุเหตุผล";
 
-    batch.update(incRef, {
-      status: "cancelled",
-      cancelledAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+  const batch = writeBatch(db);
+  const incRef = doc(db, "incidents", incidentId);
+  const tlRef = doc(collection(db, "incidents", incidentId, "timeline"));
 
-    batch.set(tlRef, {
-      status: "cancelled",
-      note: STATUS_LABELS.cancelled,
-      at: serverTimestamp(),
-    });
+  batch.update(incRef, {
+    status: "cancelled",
+    cancelReason: { reason: reason || null, note: cleanNote || null },
+    cancelledBy: "staff",
+    cancelledByUid: user?.uid || null,
+    cancelledAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
 
-    await batch.commit();
-  };
+  batch.set(tlRef, {
+    status: "cancelled",
+    note: `ยกเลิกแล้ว โดยเจ้าหน้าที่ (${reasonText})`,
+    at: serverTimestamp(),
+  });
+
+  await batch.commit();
+};
 
   const archiveIncident = async (incidentId) => {
     await updateDoc(doc(db, "incidents", incidentId), {

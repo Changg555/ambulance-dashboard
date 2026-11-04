@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 import { toMillis } from "../hooks/useIncidents";
 import ReporterDetailModal from "./ReporterDetailModal";
-import { INCIDENT_TYPES, SEVERITIES, STATUS_LABELS, SORT_OPTIONS, toOptions } from "../constants/incident";
+import { INCIDENT_TYPES, SEVERITIES, STATUS_LABELS, SORT_OPTIONS, toOptions, formatCancelReason } from "../constants/incident";
 import { sortIncidents } from "../utils/sortIncidents";
 import { csvCell, rowsToCsv, downloadCsv, isoDate, isoTime, maskPhone } from "../utils/csv";
 import { diffMin, round1 } from "../utils/analyticsStats";
@@ -114,6 +114,8 @@ function exportIncidentsToCsv(
     "พิกัด (Latitude, Longitude)",
     "พื้นที่ให้บริการ",
     "เวลาที่ใช้ดำเนินการ (นาที)",
+    "ยกเลิกโดย",
+    "เหตุผลการยกเลิก",
   ];
 
   const rows = incidents.map((item, idx) => {
@@ -146,6 +148,8 @@ function exportIncidentsToCsv(
       csvCell(area),
       // เฉพาะเคสเสร็จสิ้น (นิยามเดียวกับหน้าสถิติ) ; เคสยกเลิกเว้นว่าง
       csvCell(item.status === "completed" ? round1(diffMin(createdMs, completedMs)) : null),
+      csvCell(item.status === "cancelled" ? (item.cancelledBy === "staff" ? "เจ้าหน้าที่" : item.cancelledBy === "user" ? "ผู้แจ้งเหตุ" : "") : ""),
+      csvCell(item.status === "cancelled" ? formatCancelReason(item) : ""),
     ];
   });
 
