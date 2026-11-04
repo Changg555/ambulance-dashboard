@@ -288,7 +288,7 @@ export default function DashboardContent({ user, profile, role }) {
                       <p className="text-sm text-slate-500">
                         {severityFilter === "all" && typeFilter === "all"
                           ? "ไม่มีเหตุฉุกเฉินในขณะนี้"
-                          : "ไม่พบเคสที่ตรงกับตัวกรองที่เลือก"}
+                          : "ไม่พบเหตุที่ตรงกับตัวกรองที่เลือก"}
                       </p>
                     </div>
                   )}

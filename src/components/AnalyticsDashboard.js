@@ -173,7 +173,7 @@ function exportAnalyticsReportToCsv({
   });
   rows.push(R("รวมทั้งหมด", ...sevKeys.map((k) => colTotals[k]), total - skippedUnknown));
   if (skippedUnknown > 0) {
-    rows.push(R(`หมายเหตุ: ไม่นับเคสที่ไม่ระบุความรุนแรง ${skippedUnknown} เคส`));
+    rows.push(R(`หมายเหตุ: ไม่นับเหตุที่ไม่ระบุความรุนแรง ${skippedUnknown} เหตุ`));
   }
   rows.push([]);
 
@@ -262,7 +262,7 @@ const TypeProgressBar = ({ label, count, percentage }) => (
   <div>
     <div className="flex justify-between text-sm font-bold mb-1.5">
       <span className="text-slate-600">{label}</span>
-      <span className="text-slate-800">{count} เคส</span>
+      <span className="text-slate-800">{count} เหตุ</span>
     </div>
     <div className="w-full h-3 rounded-full bg-slate-100 overflow-hidden">
       <div
@@ -898,7 +898,7 @@ export default function AnalyticsDashboard({ incidents = [] }) {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs uppercase tracking-wider">
                   <th className="py-3 px-4 font-bold">วันที่</th>
-                  <th className="py-3 px-4 font-bold">จำนวนเคสรวม</th>
+                  <th className="py-3 px-4 font-bold">จำนวนเหตุรวม</th>
                   {dailyColumns.map((col) => (
                     <th key={col.key} className="py-3 px-3 font-bold text-center whitespace-nowrap">
                       <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: col.color }} />
