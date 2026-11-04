@@ -505,7 +505,7 @@ function HistoryToolbar({
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             ประวัติย้อนหลัง
             <span className="text-xs font-bold bg-red-50 text-red-600 px-2.5 py-1 rounded-full">
-              พบ {resultCount} เคส
+              พบ {resultCount} เหตุ
             </span>
           </h2>
           <p className="text-sm font-medium text-slate-500 mt-1">
@@ -520,7 +520,7 @@ function HistoryToolbar({
             disabled={resultCount === 0}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm"
           >
-            สร้างรายงาน CSV ({resultCount} เคส)
+            สร้างรายงาน CSV ({resultCount} เหตุ)
           </button>
 
           {role === "admin" && resultCount > 0 && (
@@ -591,7 +591,7 @@ function HistoryToolbar({
           </label>
           <input
             className={CONTROL_CLASS}
-            placeholder="เลขเคส / ผู้แจ้ง / สถานที่..."
+            placeholder="เลขเหตุ / ผู้แจ้ง / สถานที่..."
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
@@ -650,7 +650,7 @@ function HistoryToolbar({
 
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-bold text-slate-500 px-1">
-            เรียงลำดับเคส
+            เรียงลำดับเหตุ
           </label>
           <select
             className={CONTROL_CLASS}
@@ -674,7 +674,7 @@ function EmptyHistoryState() {
   return (
     <div className="text-center py-16">
       <span className="text-4xl opacity-50 mb-3 block">📭</span>
-      <p className="text-slate-500 font-medium">ไม่พบประวัติเคสในช่วงเวลาหรือเงื่อนไขที่ค้นหา</p>
+      <p className="text-slate-500 font-medium">ไม่พบประวัติเหตุในช่วงเวลาหรือเงื่อนไขที่ค้นหา</p>
     </div>
   );
 }

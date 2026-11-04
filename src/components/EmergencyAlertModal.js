@@ -221,7 +221,7 @@ export default function EmergencyAlertModal({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-black tracking-wide uppercase">
-                  มีเคสฉุกเฉินใหม่!
+                  มีเหตุฉุกเฉินใหม่!
                 </h2>
                 <span className="bg-white/20 text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-white/30 animate-pulse">
                   NEW ALERT
@@ -266,7 +266,7 @@ export default function EmergencyAlertModal({
         {pendingIncidents.length > 1 && (
           <div className="bg-amber-50 border-b border-amber-200 px-5 py-2.5 flex items-center justify-between text-xs font-bold text-amber-900">
             <span className="flex items-center gap-1.5">
-              <span>⚠️</span> มีเคสรอรับเรื่องทั้งหมด {pendingIncidents.length} เคส (กำลังแสดงเคสที่ {currentIndex + 1})
+              <span>⚠️</span> มีเหตุรอรับเรื่องทั้งหมด {pendingIncidents.length} เหตุ (กำลังแสดงเหตุที่ {currentIndex + 1})
             </span>
             <div className="flex items-center gap-1">
               <button
@@ -298,7 +298,7 @@ export default function EmergencyAlertModal({
           {/* แถบเลขเคสและเวลาแจ้งเหตุ */}
           <div className="flex items-center justify-between bg-slate-100/80 px-4 py-2 rounded-xl text-xs font-bold text-slate-600">
             <span className="font-mono text-slate-800">
-              เลขเคส: {currentIncident.caseNumber}
+              เลขเหตุ: {currentIncident.caseNumber}
             </span>
             <span>
               เวลาแจ้ง: <strong className="text-slate-800">{timeFormatted} น.</strong>
@@ -404,7 +404,7 @@ export default function EmergencyAlertModal({
             onClick={handleAcknowledge}
             className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-700 hover:to-red-700 text-white font-black text-base shadow-lg shadow-red-500/30 transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2.5 animate-pulse"
           >
-            <span>รับทราบเคส</span>
+            <span>รับทราบเหตุ</span>
           </button>
         </div>
       </div>

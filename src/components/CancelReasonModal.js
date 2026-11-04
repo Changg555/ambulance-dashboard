@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-export default function CancelReasonModal({ isOpen, title = "ยกเลิกเคส", reasons, onClose, onConfirm }) {
+export default function CancelReasonModal({ isOpen, title = "ยกเลิกเหตุ", reasons, onClose, onConfirm }) {
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
@@ -22,7 +22,7 @@ export default function CancelReasonModal({ isOpen, title = "ยกเลิก�
       onClose();
     } catch (err) {
       console.error(err);
-      setError("ยกเลิกเคสไม่สำเร็จ กรุณาลองใหม่");
+      setError("ยกเลิกเหตุไม่สำเร็จ กรุณาลองใหม่");
       setBusy(false);
     }
   };
@@ -34,7 +34,7 @@ export default function CancelReasonModal({ isOpen, title = "ยกเลิก�
             className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 space-y-4">
         <div>
           <h3 className="text-lg font-bold text-slate-800">{title}</h3>
-          <p className="text-xs text-slate-500 mt-1">เลือกเหตุผล เคสจะถูกเก็บไว้ในประวัติพร้อมเหตุผลนี้</p>
+          <p className="text-xs text-slate-500 mt-1">เลือกเหตุผล เหตุฉุกเฉินนี้จะถูกเก็บไว้ในประวัติพร้อมเหตุผลนี้</p>
         </div>
 
         <div className="space-y-2">
@@ -68,7 +68,7 @@ export default function CancelReasonModal({ isOpen, title = "ยกเลิก�
           </button>
           <button type="submit" disabled={busy}
             className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-red-500 hover:bg-red-600 text-white disabled:opacity-50">
-            {busy ? "กำลังบันทึก..." : "ยืนยันยกเลิกเคส"}
+            {busy ? "กำลังบันทึก..." : "ยืนยันยกเลิกเหตุ"}
           </button>
         </div>
       </form>

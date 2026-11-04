@@ -13,7 +13,7 @@ const SEVERITY_CLASSNAMES = {
 
 // ลำดับปุ่มเปลี่ยนสถานะที่เจ้าหน้าที่สามารถกดได้ (ใช้ค่าตรงกับ Mobile STATUS_FLOW)
 const STATUS_OPTIONS = [
-  { value: "accepted", label: "รับเคส" },
+  { value: "accepted", label: "รับเหตุ" },
   { value: "on_the_way", label: "กำลังเดินทาง" },
   { value: "arrived", label: "ถึงจุดเกิดเหตุ" },
   { value: "completed", label: "เสร็จสิ้น" },
@@ -366,7 +366,7 @@ function DangerActions({ canCancel, onRequestCancel }) {
       }}
       className="w-full mt-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl px-3 py-3 transition-all"
     >
-      ยกเลิกเคส
+      ยกเลิกเหตุ
     </button>
   );
 }
@@ -571,7 +571,7 @@ export default function IncidentCard({
 
       <CancelReasonModal
         isOpen={showCancelModal}
-        title="ยกเลิกเคสนี้?"
+        title="ยกเลิกเหตุฉุกเฉินนี้"
         reasons={STAFF_CANCEL_REASONS}
         onClose={() => setShowCancelModal(false)}
         onConfirm={(payload) => onCancel(incident.id, payload)}
