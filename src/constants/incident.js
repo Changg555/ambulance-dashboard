@@ -45,3 +45,29 @@ export const SORT_OPTIONS = [
 export function toOptions(config) {
   return Object.entries(config).map(([value, item]) => ({ value, label: item.label }));
 }
+
+export const STAFF_CANCEL_REASONS = [
+  { value: "false_report", label: "แจ้งเท็จ" },
+  { value: "duplicate", label: "แจ้งซ้ำ / มีเคสเดิมอยู่แล้ว" },
+  { value: "reporter_requested", label: "ผู้แจ้งเหตุขอยกเลิก" },
+  { value: "unreachable", label: "ติดต่อผู้แจ้งเหตุไม่ได้" },
+  { value: "out_of_area", label: "อยู่นอกพื้นที่ให้บริการ" },
+  { value: "other", label: "อื่น ๆ (โปรดระบุ)" },
+];
+
+export const CANCEL_REASON_LABELS = {
+  ...Object.fromEntries(STAFF_CANCEL_REASONS.map((r) => [r.value, r.label])),
+  helped_already: "มีคนช่วยเหลือแล้ว",
+  wrong_location: "แจ้งตำแหน่งผิด",
+  wrong_type: "เลือกประเภทเหตุผิด",
+  accidental: "กดแจ้งโดยไม่ตั้งใจ",
+  recovered: "อาการดีขึ้น ไม่ต้องการความช่วยเหลือแล้ว",
+};
+
+export function formatCancelReason(item) {
+  const { reason, note } = item?.cancelReason || {};
+  const cleanNote = (note || "").trim();
+  if (reason === "other") return cleanNote || CANCEL_REASON_LABELS.other;
+  const label = CANCEL_REASON_LABELS[reason] || reason || "";
+  return [label, cleanNote].filter(Boolean).join(": ");
+}
